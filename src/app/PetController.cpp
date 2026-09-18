@@ -42,7 +42,12 @@ constexpr int kWatchIntervalMs = 32;       // 穿透调度，30Hz 足够；再�
 constexpr int kPerfIntervalMs = 1000;
 constexpr int kTopmostIntervalMs = 2000;
 
-QIcon makeTrayIcon() {
+// 应用图标来自 app.qrc（src/app/app.ico），窗口图标与托盘图标共用同一份。
+// 若资源缺失（例如有人只拷了 exe），退回一个简单的蓝色圆点，保证托盘不空着。
+QIcon appIcon() {
+    const QIcon ic(QStringLiteral(":/app.ico"));
+    if (!ic.availableSizes().isEmpty()) return ic;
+
     QPixmap pm(32, 32);
     pm.fill(Qt::transparent);
     QPainter p(&pm);
@@ -108,8 +113,7 @@ void PetController::start(const QString& cliMedia) {
 
     if (!seq_.isValid()) {
         // 没有素材就回到 M0 的程序化圆盘
-        animClock_.start();
-        animTimer_->start(kAnimationIntervalMs);
+        resumeAnimation();
     }
 
     watchTimer_->start(kWatchIntervalMs);
@@ -148,11 +152,18 @@ bool PetController::loadMedia(const QString& path) {
     seq_ = r.seq;
     lastError_.clear();
     loadNote_.clear();
+    paused_ = false;   // 主动换素材视为"我要看它"，自动取消暂停，避免加载后停在空白帧
 
     settings_.rememberMedia(path);
     settings_.save();
 
     applySequence();
+
+    if (tray_) {
+        tray_->setToolTip(seq_.sourceName.isEmpty()
+                              ? QStringLiteral("Pic2Pet")
+                              : QStringLiteral("Pic2Pet · %1").arg(seq_.sourceName));
+    }
 
     qInfo().noquote()
         << QStringLiteral("[pet] 已加载 %1：%2x%3 · %4 帧 · %5 · 帧内存 %6 MB · 总时长 %7 ms")
@@ -174,7 +185,7 @@ void PetController::applySequence() {
 
     if (!seq_.isValid()) {
         window_->renderer()->clearSprite();
-        if (!suspended_) animTimer_->start(kAnimationIntervalMs);
+        resumeAnimation();
         return;
     }
 
@@ -186,8 +197,7 @@ void PetController::applySequence() {
         window_->renderer()->showFrame(0);
         animTimer_->stop();
     } else {
-        animClock_.start();
-        if (!suspended_) animTimer_->start(kAnimationIntervalMs);
+        resumeAnimation();
     }
 }
 
@@ -223,6 +233,56 @@ void PetController::setScalePercent(int percent) {
     settings_.save();
 }
 
+bool PetController::animatable() const {
+    // 无素材时跑的是 M0 的程序化圆盘，也算"有动画"；静态图则没有可暂停的东西
+    return !seq_.isValid() || !seq_.isStatic();
+}
+
+void PetController::resumeAnimation() {
+    if (!animTimer_ || !animatable() || paused_ || suspended_) return;
+    if (animTimer_->isActive()) return;         // 已经在跑就别重置时钟
+    animClock_.start();                         // 先归零，避免第一帧 dt 过大导致 playhead_ 跳帧
+    animTimer_->start(kAnimationIntervalMs);
+}
+
+void PetController::setPaused(bool paused) {
+    if (paused_ == paused) return;
+    paused_ = paused;
+
+    if (paused_) {
+        // 停掉动画定时器：画面停在当前帧，CPU 也一并降下来
+        if (animTimer_) animTimer_->stop();
+    } else {
+        resumeAnimation();
+    }
+
+    qInfo().noquote() << QStringLiteral("[pet] %1")
+                             .arg(paused_ ? QStringLiteral("已暂停动画") : QStringLiteral("继续播放"));
+}
+
+void PetController::resetPlacement() {
+    if (!window_) return;
+
+    // ① 缩放回到 100%
+    settings_.data.scalePercent = 100;
+    updateWindowSize();
+
+    // ② 位置回到主屏右下角（与首次启动的默认位置一致）
+    QScreen* screen = QApplication::primaryScreen();
+    const QRect avail = screen ? screen->availableGeometry() : QRect(0, 0, 1920, 1080);
+    window_->move(avail.right() - window_->width() - 60,
+                  avail.bottom() - window_->height() - 60);
+
+    settings_.data.pos = window_->pos();
+    settings_.save();
+
+    qInfo().noquote() << QStringLiteral("[pet] 已重置位置与大小 -> %1x%2 @ (%3,%4)")
+                             .arg(window_->width())
+                             .arg(window_->height())
+                             .arg(window_->x())
+                             .arg(window_->y());
+}
+
 void PetController::refreshRegions() {
     if (!window_) return;
     const QRect rect = window_->interactiveRect();
@@ -246,7 +306,7 @@ bool PetController::eventFilter(QObject* watched, QEvent* event) {
     if (t == QEvent::Show) {
         suspended_ = false;
         watchTimer_->start(kWatchIntervalMs);
-        if (!seq_.isStatic()) animTimer_->start(kAnimationIntervalMs);
+        resumeAnimation();
         return false;
     }
     if (t == QEvent::WindowStateChange) {
@@ -258,7 +318,7 @@ bool PetController::eventFilter(QObject* watched, QEvent* event) {
         } else if (suspended_ && window_ && window_->isVisible()) {
             suspended_ = false;
             watchTimer_->start(kWatchIntervalMs);
-            if (!seq_.isStatic()) animTimer_->start(kAnimationIntervalMs);
+            resumeAnimation();
         }
         return false;
     }
@@ -435,9 +495,23 @@ void PetController::rebuildMenu(QMenu* menu) {
         });
     }
 
+    menu->addSeparator();
+
+    // 暂停 / 继续：静态图没有可暂停的东西，直接禁用；暂停会同时停掉定时器省 CPU
+    auto* pauseAction = menu->addAction(paused_ ? QStringLiteral("继续动画")
+                                                : QStringLiteral("暂停动画"));
+    pauseAction->setEnabled(animatable());
+    connect(pauseAction, &QAction::triggered, this, [this] { setPaused(!paused_); });
+
+    menu->addAction(QStringLiteral("重置位置与大小"), this, [this] { resetPlacement(); });
+
     if (seq_.isValid() && !seq_.sourceName.isEmpty()) {
-        menu->addSeparator();
-        menu->addAction(QStringLiteral("素材：%1").arg(seq_.sourceName));
+        auto* info = menu->addAction(QStringLiteral("素材：%1 · %2% · %3x%4")
+                                         .arg(seq_.sourceName)
+                                         .arg(settings_.data.scalePercent)
+                                         .arg(seq_.width)
+                                         .arg(seq_.height));
+        info->setEnabled(false);   // 纯展示，不可点
     }
 
     menu->addSeparator();
@@ -486,7 +560,7 @@ void PetController::buildTray() {
         qWarning() << "[pet] 系统托盘不可用，跳过托盘图标";
         return;
     }
-    tray_ = new QSystemTrayIcon(makeTrayIcon(), this);
+    tray_ = new QSystemTrayIcon(appIcon(), this);
     tray_->setToolTip(QStringLiteral("Pic2Pet"));
 
     trayMenu_ = new QMenu();

@@ -1,6 +1,7 @@
 #include <QApplication>
 #include <QCommandLineParser>
 #include <QDebug>
+#include <QIcon>
 #include <QSurfaceFormat>
 #include <QTimer>
 
@@ -28,6 +29,7 @@ int main(int argc, char** argv) {
     QApplication app(argc, argv);
     QApplication::setApplicationName(QStringLiteral("Pic2Pet"));
     QApplication::setApplicationVersion(QStringLiteral("0.1.0"));
+    QApplication::setWindowIcon(QIcon(QStringLiteral(":/app.ico")));   // 来自 app.qrc
     QApplication::setQuitOnLastWindowClosed(false);   // 托盘模式下关窗不退出
 
     QCommandLineParser parser;

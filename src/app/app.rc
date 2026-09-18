@@ -1,5 +1,9 @@
 #include <windows.h>
 
-// 把 app.manifest 作为 RT_MANIFEST (ID 1) 嵌入 exe：
-// 链接器会优先用这个清单，取代默认清单，从而声明"不申请管理员权限"。
+// Embed app.manifest as RT_MANIFEST (id 1) so Windows uses our manifest
+// (asInvoker / DPI / Win10-11 supportedOS) instead of a linker-generated default.
 CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "app.manifest"
+
+// Application icon. Windows uses the icon with the lowest resource id as the
+// executable's icon, so keep this at 1.
+1 ICON "app.ico"

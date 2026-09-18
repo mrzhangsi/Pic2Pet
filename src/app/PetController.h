@@ -70,8 +70,17 @@ private:
     void refreshRegions();
     void applySequence();
     void updateWindowSize();
+    /** 当前是否有可播放的动画（无素材时的程序化圆盘也算） */
+    bool animatable() const;
+    /** 在「有动画 && 未暂停 && 未隐藏」的前提下启动动画定时器；已在跑则什么都不做。
+     *  启动前会重置 animClock_，避免恢复播放时 playhead_ 跳一大步。 */
+    void resumeAnimation();
     /** 按百分比缩放，并保持窗口中心不动（视觉上比以左上角为锚点自然得多） */
     void setScalePercent(int percent);
+    /** 暂停 / 继续动画。暂停时停掉动画定时器（同时省 CPU），画面停在当前帧。 */
+    void setPaused(bool paused);
+    /** 缩放回到 100% 并移回主屏右下角默认位置 */
+    void resetPlacement();
     void rebuildMenu(QMenu* menu);
 
     PetWindow* window_ = nullptr;
@@ -96,6 +105,7 @@ private:
     Settings settings_;
     int targetSize_ = 360;
     bool suspended_ = false;       // 隐藏时挂起定时器
+    bool paused_ = false;          // 用户手动暂停（不持久化，每次启动都重新播放）
     QString lastError_;
     QString loadNote_;
 

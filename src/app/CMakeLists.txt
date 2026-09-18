@@ -15,7 +15,8 @@ add_executable(Pic2Pet
     Settings.cpp
     AutoStart.h
     AutoStart.cpp
-    app.rc          # 链接期把 app.manifest 作为 RT_MANIFEST 焊死进 exe
+    app.rc          # Windows resources: RT_MANIFEST (app.manifest) + exe icon (app.ico)
+    app.qrc         # Qt resources: app.ico for QIcon (window/tray) at runtime
 )
 
 target_link_libraries(Pic2Pet

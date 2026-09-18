@@ -47,14 +47,9 @@ void Win32ClickThrough::apply(bool on) {
     if (next == ex) return;
 
     SetWindowLongPtr(hwnd, GWL_EXSTYLE, next);
-
-    // 注意：这里**不要**加 SWP_FRAMECHANGED。
-    // WS_EX_TRANSPARENT 只影响命中测试，改完立刻生效，不需要重算窗口框架；
-    // 而 SWP_FRAMECHANGED 会强制 WM_NCCALCSIZE + 重画窗口框架，在透明分层窗口上
-    // 就是一次肉眼可见的"闪一下"。
-    // 不带该标志的 SetWindowPos 只是让新样式立即生效，不会触发可见重绘。
+    // SWP_FRAMECHANGED 强制窗口管理器立刻应用新样式，否则部分场景要等下次重绘才生效
     SetWindowPos(hwnd, nullptr, 0, 0, 0, 0,
-                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
 #endif
 }
 

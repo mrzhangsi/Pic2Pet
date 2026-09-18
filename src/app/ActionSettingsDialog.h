@@ -14,8 +14,7 @@ class Settings;
 /**
  * 动作设置窗口：给 待机 / 单击 / 双击 / 拖拽 各自指定素材。
  *
- * 留空 = 沿用"宠物文件夹"里的命名约定（idle.gif / click.gif / ...）；
- * 指定了则优先用指定项。任何改动都会立刻写盘并即时生效。
+ * 留空 = 该动作没有素材（不会播放）。指定了立刻写盘并即时生效。
  *
  * 它是**普通窗口**——桌宠本身是"无边框 + 透明 + 置顶 + Tool"，这个窗口不继承那些属性；
  * 并且按需创建、关闭即释放（见 PetController::openActionSettings）。
@@ -37,7 +36,6 @@ private:
     void refreshRow(PetAction a);
     void applyChoice(PetAction a, const QString& path);
     void chooseFile(PetAction a);
-    void chooseFolder(PetAction a);
     void clearAction(PetAction a);
     void resetAll();
 

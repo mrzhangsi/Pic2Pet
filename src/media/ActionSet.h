@@ -22,24 +22,15 @@ struct ActionClip {
 };
 
 /**
- * 动作集：把"一只宠物的全部动作"打包起来。
+ * 动作集：一只宠物的全部动作。
  *
- * 目录约定（放在同一个文件夹里，**名字**决定它是哪个动作，扩展名随意）：
- *
- *     <宠物目录>/
- *         idle.gif | idle/ | 待机.gif      → 待机（默认动作）
- *         click.gif | click/ | 点击.gif    → 单击
- *         doubleclick.gif | 双击.gif      → 双击
- *         drag.gif | 拖拽.gif             → 拖拽中
- *
- * 容错：
- *   - 只给**单个文件**，或目录里一个约定名都没认出来 → 整份当作待机动作，
- *     行为与 M1 完全一致（向后兼容）。
- *   - 没有待机动作时，用第一个可用的动作兜底，避免"加载成功却什么都不显示"。
+ * 只认**单个素材文件**，不依赖任何目录结构：
+ *   - `load()` 给的那个文件 → 待机动作
+ *   - 其余动作来自"动作设置"窗口的指定项（`setActionFromPath`）；没指定就没有该动作
  */
 class ActionSet {
 public:
-    /** 从文件或目录加载。失败时把原因写进 *error（error 可为 nullptr） */
+    /** 把单个素材文件设为待机动作。失败时把原因写进 *error（error 可为 nullptr） */
     bool load(const QString& path, QString* error);
 
     bool has(PetAction a) const;
@@ -48,23 +39,19 @@ public:
     /** 待机动作（窗口尺寸与兜底都按它来） */
     const ActionClip& idle() const { return idle_; }
 
-    /** 单独指定某个动作的素材（"动作设置"窗口的覆盖项）。loop 按动作语义决定。 */
+    /** 单独指定某个动作的素材（"动作设置"窗口的指定项）。loop 按动作语义决定。 */
     bool setActionFromPath(PetAction a, const QString& path, QString* error = nullptr);
 
-    /** 没有待机动作时，用第一个可用动作兜底。
-     *  load() 内部会调；应用完覆盖项之后也应再调一次。 */
+    /** 没有待机动作时，用第一个可用动作兜底。应用完指定项之后调用一次。 */
     void ensureIdle();
 
     bool isValid() const { return idle_.isValid(); }
     /** 所有动作的帧内存合计 */
     qint64 bytes() const;
-
     /** 日志用：已加载动作一览，例如 "idle(24f) click(12f)" */
     QString summary() const;
 
     static QString actionName(PetAction a);
-    /** 从文件/目录名解析动作类型；不认识则返回 false */
-    static bool actionFromName(const QString& baseName, PetAction* out);
 
 private:
     ActionClip idle_;

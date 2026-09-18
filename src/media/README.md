@@ -1,6 +1,7 @@
 # media/ — 素材解码（M1，已实现）
 
-把 GIF / APNG / 静态图 / PNG 序列统一解码为 `FrameSequence`（RGBA8 帧数组 + 延迟数组）。
+把 GIF / APNG / 静态图统一解码为 `FrameSequence`（RGBA8 帧数组 + 延迟数组）。
+**只处理单个素材文件**，不支持"把一个目录当逐帧序列"。
 
 ## 实际实现
 
@@ -10,7 +11,8 @@
 | `CanvasCompositor.h/.cpp` | blend / dispose 合成器，**GIF 与 APNG 共用一套** |
 | `GifDecoder.h/.cpp` | 自研 GIF89a：LZW（变长码 + KWKwK）、交织、局部调色板、disposal |
 | `ApngDecoder.h/.cpp` | 自研 chunk 分割（acTL/fcTL/fdAT）+ 拼帧成独立 PNG + 手写 CRC32 → `QImage` |
-| `MediaLoader.h/.cpp` | 按魔数嗅探分发；目录序列（自然排序）；内存超额自动降采样 |
+| `MediaLoader.h/.cpp` | 按魔数嗅探分发（仅单个文件）；内存超额自动降采样 |
+| `ActionSet.h/.cpp` | 动作集：待机 / 单击 / 双击 / 拖拽，每个动作一段序列 |
 
 **M1 不引入任何第三方库**（技术方案 12.1）：GIF 完全自研；APNG 只做 chunk 层，
 IDAT 的 inflate / 滤波还原交给 Qt 内置的 PNG 解码器；WebP 动图延后。

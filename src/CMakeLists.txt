@@ -3,7 +3,7 @@ add_subdirectory(platform)
 add_subdirectory(render)
 add_subdirectory(app)
 
-# M1：素材解码（GIF / APNG / 序列 / 静态图）
+# M1：素材解码（GIF / APNG / 静态图）
 add_subdirectory(media)
 
 # 后续里程碑接入，目录已建好（见各目录 README.md）

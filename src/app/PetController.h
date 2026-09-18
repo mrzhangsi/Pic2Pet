@@ -52,7 +52,7 @@ public:
     /** 打开"动作设置"窗口（按需创建、关闭即释放） */
     void openActionSettings();
 
-    /** 加载素材（文件或目录）。失败返回 false 并把原因写进 lastError() */
+    /** 加载单个素材文件（该文件即待机动作）。失败返回 false 并把原因写进 lastError() */
     bool loadMedia(const QString& path);
     QString lastError() const { return lastError_; }
     bool hasMedia() const { return actions_.isValid(); }
@@ -78,8 +78,8 @@ private:
     /** 切到某个动作：换序列、按 loop 决定播完是否回待机。
      *  force=true 时即使已经在放同一个循环动作也重新从头播。 */
     void playAction(PetAction a, bool force = false);
-    /** 由「base 路径的命名约定 + 设置里的逐项覆盖」组合出动作集。
-     *  base 挂了但覆盖项齐备时仍算成功。失败时把原因写进 *error。 */
+    /** 由「基础素材文件（= 待机）+ 设置里逐项指定的动作素材」组合出动作集。
+     *  基础素材挂了但指定项齐备时仍算成功。失败时把原因写进 *error。 */
     bool composeActions(const QString& base, ActionSet* out, QString* error) const;
     /** 用 composeActions(settings.lastMedia) 重建动作集，并立即生效 */
     void reloadActions();

@@ -62,7 +62,7 @@ int main(int argc, char** argv) {
     QCommandLineParser parser;
     parser.setApplicationDescription(QStringLiteral("导出素材每一帧为 PNG，用于和参考实现比对"));
     parser.addHelpOption();
-    parser.addPositionalArgument(QStringLiteral("input"), QStringLiteral("素材文件或目录"));
+    parser.addPositionalArgument(QStringLiteral("input"), QStringLiteral("素材文件"));
     parser.addPositionalArgument(QStringLiteral("outdir"), QStringLiteral("PNG 输出目录"));
     parser.process(app);
 

@@ -44,8 +44,7 @@ void ActionSettingsDialog::buildUi() {
     auto* root = new QVBoxLayout(this);
 
     auto* tip = new QLabel(
-        QStringLiteral("给每个动作单独指定素材。留空则沿用「宠物文件夹」里的命名约定"
-                       "（idle / click / doubleclick / drag）。改动立即生效。"),
+        QStringLiteral("给每个动作单独指定素材文件。留空表示该动作没有素材、不会播放。改动立即生效。"),
         this);
     tip->setWordWrap(true);
     root->addWidget(tip);
@@ -74,21 +73,18 @@ void ActionSettingsDialog::buildUi() {
         sourceLabels_.insert(int(a), src);
         grid->addWidget(src, r, 1);
 
-        auto* pickFile = new QPushButton(QStringLiteral("文件…"), this);
-        auto* pickDir = new QPushButton(QStringLiteral("文件夹…"), this);
+        auto* pickFile = new QPushButton(QStringLiteral("选择文件…"), this);
         auto* preview = new QPushButton(QStringLiteral("试播"), this);
         auto* clear = new QPushButton(QStringLiteral("清除"), this);
-        for (QPushButton* b : { pickFile, pickDir, preview, clear }) b->setAutoDefault(false);
+        for (QPushButton* b : { pickFile, preview, clear }) b->setAutoDefault(false);
 
         connect(pickFile, &QPushButton::clicked, this, [this, a] { chooseFile(a); });
-        connect(pickDir, &QPushButton::clicked, this, [this, a] { chooseFolder(a); });
         connect(preview, &QPushButton::clicked, this, [this, a] { emit previewRequested(a); });
         connect(clear, &QPushButton::clicked, this, [this, a] { clearAction(a); });
 
         auto* btns = new QHBoxLayout();
         btns->setSpacing(6);
         btns->addWidget(pickFile);
-        btns->addWidget(pickDir);
         btns->addWidget(preview);
         btns->addWidget(clear);
         grid->addLayout(btns, r, 2);
@@ -100,7 +96,7 @@ void ActionSettingsDialog::buildUi() {
     root->addStretch(1);
 
     auto* bottom = new QHBoxLayout();
-    auto* reset = new QPushButton(QStringLiteral("全部恢复为文件夹约定"), this);
+    auto* reset = new QPushButton(QStringLiteral("全部清除"), this);
     reset->setAutoDefault(false);
     connect(reset, &QPushButton::clicked, this, [this] { resetAll(); });
     bottom->addWidget(reset);
@@ -129,7 +125,7 @@ void ActionSettingsDialog::refreshRow(PetAction a) {
 
     const QString path = field(a);
     if (path.isEmpty()) {
-        src->setText(QStringLiteral("<span style='color:#888'>（沿用宠物文件夹约定）</span>"));
+        src->setText(QStringLiteral("<span style='color:#888'>（未指定）</span>"));
         src->setToolTip(QString());
         return;
     }
@@ -150,14 +146,6 @@ void ActionSettingsDialog::chooseFile(PetAction a) {
         this, QStringLiteral("为「%1」选择素材").arg(ActionSet::actionName(a)), cur, mediaFilter());
     if (path.isEmpty()) return;
     applyChoice(a, path);
-}
-
-void ActionSettingsDialog::chooseFolder(PetAction a) {
-    const QString& cur = field(a);
-    const QString dir = QFileDialog::getExistingDirectory(
-        this, QStringLiteral("为「%1」选择序列文件夹").arg(ActionSet::actionName(a)), cur);
-    if (dir.isEmpty()) return;
-    applyChoice(a, dir);
 }
 
 void ActionSettingsDialog::clearAction(PetAction a) {

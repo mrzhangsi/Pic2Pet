@@ -2,7 +2,6 @@
 
 #include "ActionSettingsDialog.h"
 #include "AutoStart.h"
-#include "MediaLoader.h"
 #include "PetRenderer.h"
 #include "PetWindow.h"
 
@@ -211,7 +210,7 @@ bool PetController::loadMedia(const QString& path) {
         return false;
     }
 
-    // 记住这份素材/文件夹："动作设置"里的指定项就是在这个基础上逐项覆盖
+    // 记住这份素材文件："动作设置"里的指定项就是在这个基础上逐项覆盖
     settings_.rememberMedia(path);
     settings_.save();
 

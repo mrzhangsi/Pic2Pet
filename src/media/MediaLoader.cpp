@@ -3,11 +3,9 @@
 #include "ApngDecoder.h"
 #include "GifDecoder.h"
 
-#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QImage>
-#include <QStringList>
 
 #include <algorithm>
 
@@ -16,31 +14,6 @@
 namespace pic2pet {
 
 namespace {
-
-/** 自然排序：名字里的数字按数值比（frame2 < frame10） */
-bool naturalLess(const QString& a, const QString& b) {
-    int ia = 0, ib = 0;
-    while (ia < a.size() && ib < b.size()) {
-        const ushort ca = a.at(ia).unicode();
-        const ushort cb = b.at(ib).unicode();
-        if (ca >= '0' && ca <= '9' && cb >= '0' && cb <= '9') {
-            int ja = ia, jb = ib;
-            while (ja < a.size() && a.at(ja) >= '0' && a.at(ja) <= '9') ++ja;
-            while (jb < b.size() && b.at(jb) >= '0' && b.at(jb) <= '9') ++jb;
-            const int na = a.mid(ia, ja - ia).toInt();
-            const int nb = b.mid(ib, jb - ib).toInt();
-            if (na != nb) return na < nb;
-            if ((ja - ia) != (jb - ib)) return (ja - ia) < (jb - ib);
-            ia = ja;
-            ib = jb;
-            continue;
-        }
-        if (ca != cb) return ca < cb;
-        ++ia;
-        ++ib;
-    }
-    return a.size() < b.size();
-}
 
 QByteArray toRgba8888(const QImage& img) {
     const QImage rgba = img.convertToFormat(QImage::Format_RGBA8888);
@@ -89,12 +62,6 @@ QByteArray resampleRgba(const uchar* src, int sw, int sh, int dw, int dh) {
 
 } // namespace
 
-QStringList MediaLoader::imageFilter() {
-    return QStringList() << QStringLiteral("*.png") << QStringLiteral("*.jpg")
-                         << QStringLiteral("*.jpeg") << QStringLiteral("*.bmp")
-                         << QStringLiteral("*.webp");
-}
-
 MediaResult MediaLoader::loadPath(const QString& path, const Options& opt) {
     const QFileInfo info(path);
     if (!info.exists()) {
@@ -102,7 +69,12 @@ MediaResult MediaLoader::loadPath(const QString& path, const Options& opt) {
         r.error = QStringLiteral("路径不存在：%1").arg(path);
         return r;
     }
-    if (info.isDir()) return loadDirectory(path, opt.sequenceDelayMs);
+    if (info.isDir()) {
+        // 只支持单个素材文件，不再支持"把一个目录当逐帧序列"
+        MediaResult r;
+        r.error = QStringLiteral("请选择素材文件，不支持文件夹：%1").arg(path);
+        return r;
+    }
     return loadFile(path, opt);
 }
 
@@ -140,63 +112,6 @@ MediaResult MediaLoader::loadFile(const QString& path, const Options& opt) {
     }
 
     return loadStillImage(path);
-}
-
-MediaResult MediaLoader::loadDirectory(const QString& dir, double delayMs) {
-    MediaResult r;
-
-    QDir d(dir);
-    const QStringList names = d.entryList(imageFilter(), QDir::Files, QDir::Name);
-    if (names.isEmpty()) {
-        r.error = QStringLiteral("目录里没有可用图片：%1").arg(dir);
-        return r;
-    }
-
-    QStringList sorted = names;
-    std::sort(sorted.begin(), sorted.end(), naturalLess);
-
-    FrameSequence seq;
-    const double delaySec = std::max(0.01, delayMs / 1000.0);
-
-    for (const QString& name : sorted) {
-        const QString full = d.filePath(name);
-        QImage img(full);
-        if (img.isNull()) continue;
-
-        QImage normalized = img;
-        if (seq.isValid()) {
-            if (img.width() != seq.width || img.height() != seq.height) {
-                normalized = img.scaled(seq.width, seq.height, Qt::KeepAspectRatio,
-                                        Qt::SmoothTransformation);
-            }
-        } else {
-            seq.width = img.width();
-            seq.height = img.height();
-        }
-
-        const QByteArray bits = toRgba8888(normalized);
-        if (bits.isEmpty()) continue;
-
-        if (bits.size() < seq.width * seq.height * 4) continue;
-
-        seq.frames.push_back(bits);
-        seq.delays.push_back(delaySec);
-    }
-
-    if (seq.frames.isEmpty()) {
-        r.error = QStringLiteral("目录里的图片都读取失败：%1").arg(dir);
-        return r;
-    }
-
-    seq.rebuildStarts();
-    seq.sourceName = QFileInfo(dir).fileName();
-
-    QString note;
-    applyMemoryGuard(seq, &note);
-
-    r.ok = true;
-    r.seq = seq;
-    return r;
 }
 
 MediaResult MediaLoader::loadStillImage(const QString& path) {

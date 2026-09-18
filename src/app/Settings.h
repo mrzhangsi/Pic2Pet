@@ -20,10 +20,10 @@ struct PetSettingsData {
     int scalePercent = 100;           // 缩放，kMinScalePercent~kMaxScalePercent
     double opacity = 1.0;             // 0.1~1.0
     bool alwaysOnTop = true;
-    QString lastMedia;                // 上次加载的素材/宠物文件夹
+    QString lastMedia;                // 上次加载的素材文件
     QStringList recentMedia;          // 最近 5 个
 
-    // 每个动作的"指定素材"。留空 = 沿用宠物文件夹里的命名约定（idle.gif / click.gif / ...）
+    // 每个动作的"指定素材文件"。留空 = 该动作没有素材（不会播放）
     QString actionIdle;
     QString actionClick;
     QString actionDoubleClick;

@@ -33,11 +33,11 @@ int main(int argc, char** argv) {
     QApplication::setQuitOnLastWindowClosed(false);   // 托盘模式下关窗不退出
 
     QCommandLineParser parser;
-    parser.setApplicationDescription(QStringLiteral("Pic2Pet：透明桌宠，支持 GIF / APNG / 序列 / 静态图"));
+    parser.setApplicationDescription(QStringLiteral("Pic2Pet：透明桌宠，支持 GIF / APNG / 静态图"));
     parser.addHelpOption();
     parser.addVersionOption();
     parser.addPositionalArgument(QStringLiteral("media"),
-                                 QStringLiteral("要加载的素材文件或目录（可省略，之后也能拖进来）"),
+                                 QStringLiteral("要加载的素材文件（可省略，之后也能拖进来）"),
                                  QStringLiteral("[media]"));
 
     QCommandLineOption backendOption(
@@ -54,7 +54,7 @@ int main(int argc, char** argv) {
 
     QCommandLineOption mediaOption(
         QStringList() << QStringLiteral("m") << QStringLiteral("media"),
-        QStringLiteral("启动时加载的素材文件或目录"),
+        QStringLiteral("启动时加载的素材文件"),
         QStringLiteral("path"));
     parser.addOption(mediaOption);
 

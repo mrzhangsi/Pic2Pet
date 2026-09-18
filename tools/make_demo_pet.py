@@ -1,13 +1,14 @@
-"""Generate a demo pet action set, for testing the action system.
+"""Generate demo action GIFs, for testing the action system.
 
-Creates  temp/demo_pet/  containing one GIF per action:
+Creates  temp/demo_pet/  with one GIF per action:
 
     idle.gif         blue,   gentle bobbing        (loop)
     click.gif        orange, quick "pop"           (once)
     doubleclick.gif  purple, spinning              (once)
     drag.gif         green,  sideways wobble       (loop)
 
-Drop the folder onto the pet window (or pass it as the media argument) to test.
+The app only accepts single media FILES, so assign them one by one in the
+"动作设置" window (right-click the pet -> 动作设置…).
 
 Run:  <venv-python> tools/make_demo_pet.py
 Requires: Pillow
@@ -83,8 +84,10 @@ def main():
          "drag.gif", 80)
 
     print("")
-    print("test: pass this folder to the app, e.g.")
-    print("  build\\src\\app\\Pic2Pet.exe --media \"%s\"" % OUT_DIR)
+    print("test:")
+    print("  1) build\\src\\app\\Pic2Pet.exe --media \"%s\\idle.gif\"" % OUT_DIR)
+    print("  2) right-click the pet -> 动作设置… -> assign the other three GIFs")
+    print("     (or drag any single file onto the pet)")
 
 
 if __name__ == "__main__":

@@ -2,34 +2,11 @@
 
 #include "MediaLoader.h"
 
-#include <QDir>
-#include <QFileInfo>
 #include <QStringList>
 
 namespace pic2pet {
 
 namespace {
-
-struct NameMap {
-    const char* key;
-    PetAction action;
-};
-
-// 别名表：文件名（去掉扩展名）或子目录名 → 动作（英文，比较时转小写）
-const NameMap kNameMap[] = {
-    { "idle", PetAction::Idle },
-    { "stand", PetAction::Idle },
-    { "wait", PetAction::Idle },
-
-    { "click", PetAction::Click },
-    { "tap", PetAction::Click },
-
-    { "doubleclick", PetAction::DoubleClick },
-    { "dblclick", PetAction::DoubleClick },
-
-    { "drag", PetAction::Drag },
-    { "dragging", PetAction::Drag },
-};
 
 /** 加载一段素材为动作片段；loop 由动作语义决定 */
 bool loadClip(const QString& path, bool loop, ActionClip* out) {
@@ -57,37 +34,6 @@ QString ActionSet::actionName(PetAction a) {
     return QStringLiteral("?");
 }
 
-bool ActionSet::actionFromName(const QString& baseName, PetAction* out) {
-    if (baseName.isEmpty() || !out) return false;
-
-    const QString lower = baseName.toLower();
-    for (const NameMap& m : kNameMap) {
-        if (lower == QLatin1String(m.key)) {
-            *out = m.action;
-            return true;
-        }
-    }
-
-    // 中文别名
-    if (baseName == QStringLiteral("待机")) {
-        *out = PetAction::Idle;
-        return true;
-    }
-    if (baseName == QStringLiteral("点击") || baseName == QStringLiteral("单击")) {
-        *out = PetAction::Click;
-        return true;
-    }
-    if (baseName == QStringLiteral("双击")) {
-        *out = PetAction::DoubleClick;
-        return true;
-    }
-    if (baseName == QStringLiteral("拖拽") || baseName == QStringLiteral("拖动")) {
-        *out = PetAction::Drag;
-        return true;
-    }
-    return false;
-}
-
 bool ActionSet::load(const QString& path, QString* error) {
     idle_ = ActionClip();
     click_ = ActionClip();
@@ -95,78 +41,20 @@ bool ActionSet::load(const QString& path, QString* error) {
     drag_ = ActionClip();
     if (error) error->clear();
 
-    const QFileInfo fi(path);
-    if (!fi.exists()) {
-        if (error) *error = QStringLiteral("路径不存在：%1").arg(path);
+    // 只认单个素材文件：它就是这个宠物的待机动作
+    ActionClip c;
+    if (!loadClip(path, true, &c)) {
+        if (error) *error = QStringLiteral("素材加载失败：%1").arg(path);
         return false;
     }
-
-    const auto put = [this](PetAction a, const ActionClip& c) {
-        switch (a) {
-        case PetAction::Idle:        idle_ = c; break;
-        case PetAction::Click:       click_ = c; break;
-        case PetAction::DoubleClick: doubleClick_ = c; break;
-        case PetAction::Drag:        drag_ = c; break;
-        }
-    };
-
-    if (fi.isDir()) {
-        const QDir dir(path);
-        const QFileInfoList entries =
-            dir.entryInfoList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
-
-        QString firstErr;
-        int matched = 0;
-        for (const QFileInfo& e : entries) {
-            const QString base = e.isDir() ? e.fileName() : e.completeBaseName();
-            if (base.startsWith(QLatin1Char('.'))) continue;   // 跳过隐藏项
-
-            PetAction a;
-            if (!actionFromName(base, &a)) continue;
-
-            ActionClip c;
-            if (loadClip(e.absoluteFilePath(), loopsByDefault(a), &c)) {
-                put(a, c);
-                ++matched;
-            } else if (firstErr.isEmpty()) {
-                firstErr = QStringLiteral("动作 %1 加载失败").arg(base);
-            }
-        }
-
-        if (matched == 0) {
-            // 目录里一个约定名都没认出来 → 整份当一条序列（M1 行为，向后兼容）
-            ActionClip c;
-            if (!loadClip(path, true, &c)) {
-                if (error) {
-                    *error = firstErr.isEmpty() ? QStringLiteral("目录里没有可用素材") : firstErr;
-                }
-                return false;
-            }
-            idle_ = c;
-        }
-    } else {
-        // 单个文件 → 只当待机动作
-        ActionClip c;
-        if (!loadClip(path, true, &c)) {
-            if (error) *error = QStringLiteral("素材加载失败：%1").arg(path);
-            return false;
-        }
-        idle_ = c;
-    }
-
-    ensureIdle();
-
-    if (!idle_.isValid()) {
-        if (error) *error = QStringLiteral("没有可播放的动作");
-        return false;
-    }
+    idle_ = c;
     return true;
 }
 
 void ActionSet::ensureIdle() {
     if (idle_.isValid()) return;
 
-    // 没有待机动作 → 用第一个可用动作兜底，避免"加载成功却什么都不显示"
+    // 没有待机动作 → 用第一个可用动作兜底，避免"有素材却什么都不显示"
     if (click_.isValid()) {
         idle_ = click_;
     } else if (doubleClick_.isValid()) {

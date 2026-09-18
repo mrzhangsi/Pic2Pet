@@ -52,12 +52,12 @@ void main() {
 
 // M1 精灵着色器：只做纹理采样 + alpha 丢弃。
 // 注意没有做 gamma / 颜色空间转换——素材本身就是 sRGB，这里原样输出即可。
-// uScale：精灵在视口内的相对缩放（1.0 = 铺满）。用于「分级扩容」——窗口尺寸只按档位变化，
-// 档内的连续缩放靠这里做，避免频繁 resize 窗口导致闪烁。
+// uScale：精灵在视口内的相对缩放，(1,1) = 铺满。双轴是为了让"宽高比不同的动作"
+// 也能等比铺进同一个固定尺寸的窗口而不变形。
 const char* kSpriteVertexShader = R"(
 attribute vec2 aPos;
 attribute vec2 aTex;
-uniform float uScale;
+uniform vec2 uScale;
 varying vec2 vUv;
 void main() {
     vUv = aTex;
@@ -126,12 +126,15 @@ void PetRenderer::clearSprite() {
     update();
 }
 
-void PetRenderer::setZoomScale(float s) {
-    if (!(s > 0.0f)) s = 0.0001f;   // 同时挡住 <=0 与 NaN
-    if (s > 1.0f) s = 1.0f;
-    if (qFuzzyCompare(zoomScale_, s)) return;
+void PetRenderer::setSpriteScale(float sx, float sy) {
+    if (!(sx > 0.0f)) sx = 0.0001f;   // 同时挡住 <=0 与 NaN
+    if (!(sy > 0.0f)) sy = 0.0001f;
+    if (sx > 1.0f) sx = 1.0f;
+    if (sy > 1.0f) sy = 1.0f;
+    if (qFuzzyCompare(scaleX_, sx) && qFuzzyCompare(scaleY_, sy)) return;
 
-    zoomScale_ = s;
+    scaleX_ = sx;
+    scaleY_ = sy;
     update();
 }
 
@@ -294,7 +297,7 @@ void PetRenderer::paintGL() {
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, texture_);
         spriteProgram_.setUniformValue("uTex", 0);
-        spriteProgram_.setUniformValue("uScale", zoomScale_);
+        spriteProgram_.setUniformValue("uScale", scaleX_, scaleY_);
 
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 

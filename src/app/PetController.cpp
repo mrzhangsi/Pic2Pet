@@ -41,6 +41,7 @@ constexpr int kAnimationIntervalMs = 16;   // 播放驱动：保持 16ms，不�
 constexpr int kWatchIntervalMs = 32;       // 穿透调度，30Hz 足够；再快只是白烧 CPU
 constexpr int kPerfIntervalMs = 1000;
 constexpr int kTopmostIntervalMs = 2000;
+constexpr int kOneShotStaticHoldMs = 600;  // 静态的一次性动作停留时长，然后回待机
 
 // 应用图标来自 app.qrc（src/app/app.ico），窗口图标与托盘图标共用同一份。
 // 若资源缺失（例如有人只拷了 exe），退回一个简单的蓝色圆点，保证托盘不空着。
@@ -68,6 +69,8 @@ PetController::PetController(ClickThroughBackend backend, int size, bool useTray
     window_->installEventFilter(this);
     connect(window_, &PetWindow::dragStarted, this, &PetController::onDragStarted);
     connect(window_, &PetWindow::dragEnded, this, &PetController::onDragEnded);
+    connect(window_, &PetWindow::clicked, this, &PetController::onClicked);
+    connect(window_, &PetWindow::doubleClicked, this, &PetController::onDoubleClicked);
     connect(window_, &PetWindow::contextMenuRequested, this, &PetController::onContextMenu);
     connect(window_, &PetWindow::fileDropped, this, &PetController::onFileDropped);
     connect(window_, &PetWindow::wheelZoomed, this, &PetController::onWheelZoomed);
@@ -96,6 +99,12 @@ PetController::PetController(ClickThroughBackend backend, int size, bool useTray
         zooming_ = false;
         settings_.save();
     });
+
+    // 静态的一次性动作（例如"点击"只给了一张 PNG）没有动画可播完，
+    // 用它停留一会儿再自动回待机。
+    actionHoldTimer_ = new QTimer(this);
+    actionHoldTimer_->setSingleShot(true);
+    connect(actionHoldTimer_, &QTimer::timeout, this, [this] { playAction(PetAction::Idle, true); });
 
     window_->setWindowOpacity(settings_.data.opacity);
     window_->resize(size, size);
@@ -151,14 +160,15 @@ bool PetController::grabFramebuffer(const QString& path) {
 }
 
 bool PetController::loadMedia(const QString& path) {
-    const MediaResult r = MediaLoader::loadPath(path);
-    if (!r.ok) {
-        lastError_ = r.error;
-        qWarning().noquote() << "[pet] 加载失败：" << r.error;
+    ActionSet set;
+    QString err;
+    if (!set.load(path, &err)) {
+        lastError_ = err;
+        qWarning().noquote() << "[pet] 加载失败：" << err;
         return false;
     }
 
-    seq_ = r.seq;
+    actions_ = set;
     lastError_.clear();
     loadNote_.clear();
     paused_ = false;   // 主动换素材视为"我要看它"，自动取消暂停，避免加载后停在空白帧
@@ -166,62 +176,83 @@ bool PetController::loadMedia(const QString& path) {
     settings_.rememberMedia(path);
     settings_.save();
 
-    applySequence();
+    playAction(PetAction::Idle, true);
 
+    const FrameSequence& idle = actions_.idle().seq;
     if (tray_) {
-        tray_->setToolTip(seq_.sourceName.isEmpty()
+        tray_->setToolTip(idle.sourceName.isEmpty()
                               ? QStringLiteral("Pic2Pet")
-                              : QStringLiteral("Pic2Pet · %1").arg(seq_.sourceName));
+                              : QStringLiteral("Pic2Pet · %1").arg(idle.sourceName));
     }
 
     qInfo().noquote()
-        << QStringLiteral("[pet] 已加载 %1：%2x%3 · %4 帧 · %5 · 帧内存 %6 MB · 总时长 %7 ms")
-               .arg(seq_.sourceName.isEmpty() ? QStringLiteral("<memory>") : seq_.sourceName)
-               .arg(seq_.width)
-               .arg(seq_.height)
-               .arg(seq_.count())
-               .arg(seq_.isStatic() ? QStringLiteral("静态") : QStringLiteral("动画"))
-               .arg(double(seq_.bytes()) / (1024.0 * 1024.0), 0, 'f', 1)
-               .arg(qint64(seq_.totalDuration * 1000.0));
+        << QStringLiteral("[pet] 已加载 %1：待机 %2x%3 · 帧内存合计 %4 MB · 动作 [%5]")
+               .arg(idle.sourceName.isEmpty() ? QStringLiteral("<memory>") : idle.sourceName)
+               .arg(idle.width)
+               .arg(idle.height)
+               .arg(double(actions_.bytes()) / (1024.0 * 1024.0), 0, 'f', 1)
+               .arg(actions_.summary());
     return true;
 }
 
-void PetController::applySequence() {
+void PetController::playAction(PetAction a, bool force) {
     if (!window_ || !window_->renderer()) return;
+
+    // 该动作没提供 → 不打断当前动作（待机继续）
+    if (a != PetAction::Idle && !actions_.has(a)) return;
+
+    const ActionClip& c = actions_.clip(a);
+    if (!c.isValid()) return;
+
+    // 已经在放同一个循环动作：没必要重来
+    if (!force && a == currentAction_ && c.loop) return;
+
+    if (actionHoldTimer_) actionHoldTimer_->stop();
+
+    currentAction_ = a;
+    loopCurrent_ = c.loop;
+    seq_ = c.seq;
 
     currentFrame_ = -1;
     playhead_ = 0.0;
 
-    if (!seq_.isValid()) {
-        window_->renderer()->clearSprite();
-        resumeAnimation();
-        return;
-    }
-
     window_->renderer()->setSprite(seq_);
-    updateWindowSize();
+    updateWindowSize();   // 窗口尺寸只由"待机动作"的宽高比决定，所以换动作不会 resize
 
     if (seq_.isStatic()) {
-        // ① 静态图：上传一次就够了，之后不再有任何绘制
+        // ① 静态素材：上传一次就够了，之后不再有任何绘制
         window_->renderer()->showFrame(0);
         animTimer_->stop();
+        if (!loopCurrent_) {
+            // 静态的一次性动作没有"播完"这回事，停留一下再回待机
+            actionHoldTimer_->start(kOneShotStaticHoldMs);
+        }
     } else {
         resumeAnimation();
     }
+
+    qInfo().noquote() << QStringLiteral("[pet] 动作 -> %1 %2")
+                             .arg(ActionSet::actionName(a),
+                                  loopCurrent_ ? QStringLiteral("(循环)")
+                                               : QStringLiteral("(一次)"));
 }
 
 QSize PetController::spriteWindowSize() const {
-    if (!seq_.isValid()) return QSize();
+    // 窗口尺寸固定由**待机动作**的宽高比决定（不是当前动作）：
+    // 这样切换动作时窗口不会 resize，也就不会闪。
+    // 其它动作宽高比不同没关系——渲染端用双轴缩放等比铺进来。
+    if (!actions_.isValid()) return QSize();
 
-    const double base = double(std::max(seq_.width, seq_.height));
+    const FrameSequence& idle = actions_.idle().seq;
+    const double base = double(std::max(idle.width, idle.height));
     if (base <= 0) return QSize();
 
     // 固定按**最大**缩放预留：缩放过程中窗口尺寸永不变化 —— 这是"完全不闪"的前提。
     // （Windows 上只要改窗口尺寸，透明 + OpenGL 窗口的合成表面就要重建，必然闪一帧。）
     const double scale = (double(targetSize_) / base) * (kMaxScalePercent / 100.0);
 
-    return QSize(std::max(16, int(seq_.width * scale + 0.5)),
-                 std::max(16, int(seq_.height * scale + 0.5)));
+    return QSize(std::max(16, int(idle.width * scale + 0.5)),
+                 std::max(16, int(idle.height * scale + 0.5)));
 }
 
 void PetController::updateWindowSize() {
@@ -234,16 +265,24 @@ void PetController::updateWindowSize() {
 
 void PetController::applyZoomToRenderer() {
     if (!window_ || !window_->renderer()) return;
+    if (!seq_.isValid()) return;
 
-    // 窗口已按最大缩放预留，所以渲染缩放 = 当前% / 最大%，恒在 (0, 1]
-    const float scale = float(settings_.data.scalePercent) / float(kMaxScalePercent);
-    window_->renderer()->setZoomScale(scale);
+    const QSize win = window_->size();
+    if (win.width() <= 0 || win.height() <= 0) return;
+
+    // 先让当前动作"等比铺满"窗口（窗口是按待机动作的宽高比预留的），再叠上缩放。
+    // 双轴分开算，所以宽高比不同的动作也不会被拉变形。
+    const double fit = std::min(double(win.width()) / seq_.width,
+                                double(win.height()) / seq_.height);
+    const double total = fit * (double(settings_.data.scalePercent) / kMaxScalePercent);
+
+    window_->renderer()->setSpriteScale(float(double(seq_.width) * total / win.width()),
+                                       float(double(seq_.height) * total / win.height()));
 
     // 精灵在窗口里的实际绘制区域（居中）→ 可交互区跟着它走，
     // 否则窗口比精灵大出来的透明区域会吃掉鼠标事件
-    const QSize win = window_->size();
-    const int dw = std::max(1, int(win.width() * scale + 0.5f));
-    const int dh = std::max(1, int(win.height() * scale + 0.5f));
+    const int dw = std::max(1, int(double(seq_.width) * total + 0.5));
+    const int dh = std::max(1, int(double(seq_.height) * total + 0.5));
     window_->setSpriteRect(QRect((win.width() - dw) / 2, (win.height() - dh) / 2, dw, dh));
 
     refreshRegions();
@@ -383,6 +422,10 @@ void PetController::onAnimationTick() {
     const double dt = animClock_.restart() / 1000.0;
     playhead_ += dt;
     if (playhead_ >= seq_.totalDuration) {
+        if (!loopCurrent_) {
+            playAction(PetAction::Idle, true);   // 一次性动作播完 → 回待机
+            return;
+        }
         // 手工取模而不是 fmod：帧数少时更快，也不会累积浮点误差
         playhead_ -= seq_.totalDuration;
         if (playhead_ < 0.0) playhead_ = 0.0;
@@ -466,13 +509,26 @@ void PetController::onTopmostTick() {
 #endif
 }
 
-void PetController::onDragStarted() { dragging_ = true; }
+void PetController::onDragStarted() {
+    dragging_ = true;
+    playAction(PetAction::Drag);        // 没提供拖拽动作时，内部会自动忽略
+}
 
 void PetController::onDragEnded() {
     dragging_ = false;
-    if (!window_) return;
-    settings_.data.pos = window_->pos();
-    settings_.save();
+    if (window_) {
+        settings_.data.pos = window_->pos();
+        settings_.save();
+    }
+    playAction(PetAction::Idle, true);  // 松手回待机
+}
+
+void PetController::onClicked() {
+    playAction(PetAction::Click);
+}
+
+void PetController::onDoubleClicked() {
+    playAction(PetAction::DoubleClick);
 }
 
 void PetController::onFileDropped(const QString& path) {
@@ -544,12 +600,25 @@ void PetController::rebuildMenu(QMenu* menu) {
 
     menu->addAction(QStringLiteral("重置位置与大小"), this, [this] { resetPlacement(); });
 
-    if (seq_.isValid() && !seq_.sourceName.isEmpty()) {
-        auto* info = menu->addAction(QStringLiteral("素材：%1 · %2% · %3x%4")
-                                         .arg(seq_.sourceName)
+    // 动作子菜单：既能手动触发（方便验证），也能一眼看出哪些动作已提供
+    if (actions_.isValid()) {
+        auto* actionMenu = menu->addMenu(QStringLiteral("动作"));
+        const PetAction kAll[] = { PetAction::Idle, PetAction::Click,
+                                   PetAction::DoubleClick, PetAction::Drag };
+        for (PetAction a : kAll) {
+            const bool ok = actions_.has(a);
+            auto* act = actionMenu->addAction(
+                ok ? ActionSet::actionName(a)
+                   : QStringLiteral("%1（未提供）").arg(ActionSet::actionName(a)));
+            act->setEnabled(ok);
+            connect(act, &QAction::triggered, this, [this, a] { playAction(a, true); });
+        }
+
+        auto* info = menu->addAction(QStringLiteral("素材：%1 · %2% · 待机 %3x%4")
+                                         .arg(actions_.idle().seq.sourceName)
                                          .arg(settings_.data.scalePercent)
-                                         .arg(seq_.width)
-                                         .arg(seq_.height));
+                                         .arg(actions_.idle().seq.width)
+                                         .arg(actions_.idle().seq.height));
         info->setEnabled(false);   // 纯展示，不可点
     }
 

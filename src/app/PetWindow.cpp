@@ -14,6 +14,13 @@
 
 namespace pic2pet {
 
+namespace {
+
+// 按下后移动超过这个距离才算拖拽，否则松开时算"单击"
+constexpr int kDragThresholdPx = 4;
+
+} // namespace
+
 PetWindow::PetWindow(int size, QWidget* parent) : QWidget(parent) {
     setWindowFlags(Qt::FramelessWindowHint      // 无边框
                    | Qt::WindowStaysOnTopHint   // 置顶
@@ -54,9 +61,13 @@ void PetWindow::updateInteractiveRect() {
 
 void PetWindow::mousePressEvent(QMouseEvent* event) {
     if (event->button() == Qt::LeftButton) {
-        dragging_ = true;
-        dragOffset_ = event->globalPosition().toPoint() - frameGeometry().topLeft();
-        emit dragStarted();
+        // 按下时先**不算**拖拽：等光标移动超过阈值才升级为拖拽，否则松开算单击。
+        // （原来一按下就进拖拽，导致"点击动作"永远没机会触发。）
+        pressed_ = true;
+        dragging_ = false;
+        suppressClick_ = false;
+        pressPos_ = event->globalPosition().toPoint();
+        dragOffset_ = pressPos_ - frameGeometry().topLeft();
         event->accept();
         return;
     }
@@ -64,8 +75,21 @@ void PetWindow::mousePressEvent(QMouseEvent* event) {
 }
 
 void PetWindow::mouseMoveEvent(QMouseEvent* event) {
-    if (dragging_) {
-        move(event->globalPosition().toPoint() - dragOffset_);
+    if (pressed_ || dragging_) {
+        const QPoint gp = event->globalPosition().toPoint();
+
+        if (!dragging_) {
+            if ((gp - pressPos_).manhattanLength() < kDragThresholdPx) {
+                event->accept();
+                return;                     // 还在阈值内，仍当"点击候选"
+            }
+            dragging_ = true;
+            // 用"升级为拖拽的那一刻"重新锚定，避免窗口跳一下
+            dragOffset_ = gp - frameGeometry().topLeft();
+            emit dragStarted();
+        }
+
+        move(gp - dragOffset_);
         event->accept();
         return;
     }
@@ -73,13 +97,35 @@ void PetWindow::mouseMoveEvent(QMouseEvent* event) {
 }
 
 void PetWindow::mouseReleaseEvent(QMouseEvent* event) {
-    if (dragging_ && event->button() == Qt::LeftButton) {
-        dragging_ = false;
-        emit dragEnded();
-        event->accept();
+    if (event->button() != Qt::LeftButton) {
+        QWidget::mouseReleaseEvent(event);
         return;
     }
-    QWidget::mouseReleaseEvent(event);
+
+    const bool wasDragging = dragging_;
+    pressed_ = false;
+    dragging_ = false;
+
+    if (wasDragging) {
+        emit dragEnded();
+    } else if (!suppressClick_) {
+        emit clicked();                     // 没移动 → 单击
+    }
+    suppressClick_ = false;
+    event->accept();
+}
+
+void PetWindow::mouseDoubleClickEvent(QMouseEvent* event) {
+    if (event->button() != Qt::LeftButton) {
+        QWidget::mouseDoubleClickEvent(event);
+        return;
+    }
+    // 双击的序列是 press / release / dblclick / release：
+    // 第一次 release 已经发过 clicked()，这里再发 doubleClicked()；
+    // 紧跟的第二次 release 要抑制掉，别再多打一次单击。
+    suppressClick_ = true;
+    emit doubleClicked();
+    event->accept();
 }
 
 void PetWindow::resizeEvent(QResizeEvent* event) {

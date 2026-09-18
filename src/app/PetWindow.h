@@ -41,6 +41,9 @@ public:
 signals:
     void dragStarted();
     void dragEnded();
+    /** 左键按下后**没有移动**就松开 = 单击（用来触发"点击动作"） */
+    void clicked();
+    void doubleClicked();
     void contextMenuRequested(const QPoint& globalPos);
     void fileDropped(const QString& path);
     /** 滚轮缩放：steps > 0 放大，< 0 缩小（每格 = angleDelta/120） */
@@ -50,6 +53,7 @@ protected:
     void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
+    void mouseDoubleClickEvent(QMouseEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
     void contextMenuEvent(QContextMenuEvent* event) override;
     void dragEnterEvent(QDragEnterEvent* event) override;
@@ -62,7 +66,10 @@ private:
     PetRenderer* renderer_ = nullptr;
     QRect interactive_;
     QRect spriteRect_;     // 精灵实际绘制区域；invalid 时按整窗中心 70% 兜底
+    bool pressed_ = false;         // 左键已按下（还没升级成拖拽）
     bool dragging_ = false;
+    bool suppressClick_ = false;   // 双击之后的那个 release 不要再算单击
+    QPoint pressPos_;
     QPoint dragOffset_;
     int wheelAccum_ = 0;   // 滚轮残量：高分辨率滚轮 delta 很小，攒够一格才走一步
 };

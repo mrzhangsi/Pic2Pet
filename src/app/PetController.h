@@ -5,6 +5,7 @@
 #include <QPointer>
 #include <QRect>
 
+#include "ActionSet.h"
 #include "ClickThrough.h"
 #include "FrameSequence.h"
 #include "HitRegions.h"
@@ -50,7 +51,7 @@ public:
     /** 加载素材（文件或目录）。失败返回 false 并把原因写进 lastError() */
     bool loadMedia(const QString& path);
     QString lastError() const { return lastError_; }
-    bool hasMedia() const { return seq_.isValid(); }
+    bool hasMedia() const { return actions_.isValid(); }
 
     bool eventFilter(QObject* watched, QEvent* event) override;
 
@@ -61,6 +62,8 @@ private slots:
     void onTopmostTick();
     void onDragStarted();
     void onDragEnded();
+    void onClicked();
+    void onDoubleClicked();
     void onContextMenu(const QPoint& globalPos);
     void onFileDropped(const QString& path);
     void onWheelZoomed(int steps);
@@ -68,7 +71,9 @@ private slots:
 private:
     void buildTray();
     void refreshRegions();
-    void applySequence();
+    /** 切到某个动作：换序列、按 loop 决定播完是否回待机。
+     *  force=true 时即使已经在放同一个循环动作也重新从头播。 */
+    void playAction(PetAction a, bool force = false);
     void updateWindowSize();
     /** 当前是否有可播放的动画（无素材时的程序化圆盘也算） */
     bool animatable() const;
@@ -98,13 +103,17 @@ private:
     QTimer* perfTimer_ = nullptr;
     QTimer* topmostTimer_ = nullptr;
     QTimer* zoomSettleTimer_ = nullptr;   // 缩放停顿判定：期间冻结穿透翻转、结束时才写盘
+    QTimer* actionHoldTimer_ = nullptr;   // 静态的一次性动作：停一下再回待机
     QSystemTrayIcon* tray_ = nullptr;
     QMenu* trayMenu_ = nullptr;
 
     QElapsedTimer animClock_;
     mutable PerfProbe probe_;
 
-    FrameSequence seq_;
+    FrameSequence seq_;             // 当前正在播放的动作序列（= actions_ 里当前动作的 seq）
+    ActionSet actions_;             // 待机 / 单击 / 双击 / 拖拽
+    PetAction currentAction_ = PetAction::Idle;
+    bool loopCurrent_ = true;       // 当前动作是否循环
     double playhead_ = 0.0;        // 播放头，始终落在 [0, totalDuration)
     int currentFrame_ = -1;
 

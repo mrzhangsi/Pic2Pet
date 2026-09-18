@@ -9,6 +9,8 @@ add_library(pic2pet_media STATIC
     ApngDecoder.cpp
     MediaLoader.h
     MediaLoader.cpp
+    ActionSet.h
+    ActionSet.cpp
 )
 
 target_include_directories(pic2pet_media PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

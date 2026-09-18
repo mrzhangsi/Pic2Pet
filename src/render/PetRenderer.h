@@ -48,12 +48,13 @@ public:
     int uploadedFrame() const { return uploadedFrame_; }
 
     /**
-     * 精灵在视口内的缩放（1.0 = 铺满窗口）。
-     * 「分级扩容」用：窗口尺寸只按档位变化，档内的连续缩放靠这个值在渲染端完成，
-     * 避免频繁 resize 窗口造成闪烁。取值 (0, 1]。
+     * 精灵在视口内的缩放（1.0,1.0 = 铺满窗口），双轴分开传。
+     * 用途：窗口按"待机动作"的宽高比固定预留，而其它动作的宽高比可能不同，
+     * 双轴缩放才能让每段动作都等比铺进同一个窗口而不变形。取值 (0, 1]。
      */
-    void setZoomScale(float s);
-    float zoomScale() const { return zoomScale_; }
+    void setSpriteScale(float sx, float sy);
+    float spriteScaleX() const { return scaleX_; }
+    float spriteScaleY() const { return scaleY_; }
 
     int frameCount() const { return frames_; }
     QString glInfo() const { return glInfo_; }
@@ -85,7 +86,8 @@ private:
     int uploadedFrame_ = -1;     // 已上传 GPU 的帧
     GLuint texture_ = 0;
     bool textureAllocated_ = false;
-    float zoomScale_ = 1.0f;     // 精灵在视口内的相对缩放，(0,1]
+    float scaleX_ = 1.0f;        // 精灵在视口内的相对缩放，(0,1]，双轴
+    float scaleY_ = 1.0f;
 };
 
 } // namespace pic2pet

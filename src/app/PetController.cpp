@@ -253,6 +253,8 @@ void PetController::setScalePercent(int percent) {
     const QPoint topLeft(center.x() - target.width() / 2, center.y() - target.height() / 2);
     window_->setGeometry(QRect(topLeft, target));
     refreshRegions();
+    // 尺寸刚变过，立刻同步重绘一帧，避免合成器先显示一帧还没画内容的空白窗口（也是"闪一下"的来源之一）
+    if (window_->renderer()) window_->renderer()->repaint();
     settings_.data.pos = window_->pos();
 
     // 连滚期间冻结穿透翻转（否则窗口尺寸一变，命中判定来回翻转 WS_EX_TRANSPARENT 会闪），

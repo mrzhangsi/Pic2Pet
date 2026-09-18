@@ -88,6 +88,15 @@ PetController::PetController(ClickThroughBackend backend, int size, bool useTray
     topmostTimer_ = new QTimer(this);
     connect(topmostTimer_, &QTimer::timeout, this, &PetController::onTopmostTick);
 
+    // 缩放"停顿"判定：连滚期间保持 zooming_，期间冻结穿透翻转；停下来才写盘。
+    // 这样每个滚动 notch 都不用做 QSettings::sync()，也不会反复切换窗口样式。
+    zoomSettleTimer_ = new QTimer(this);
+    zoomSettleTimer_->setSingleShot(true);
+    connect(zoomSettleTimer_, &QTimer::timeout, this, [this] {
+        zooming_ = false;
+        settings_.save();
+    });
+
     window_->setWindowOpacity(settings_.data.opacity);
     window_->resize(size, size);
 
@@ -201,16 +210,22 @@ void PetController::applySequence() {
     }
 }
 
-void PetController::updateWindowSize() {
-    if (!window_ || !seq_.isValid()) return;
+QSize PetController::spriteWindowSize(int percent) const {
+    if (!seq_.isValid()) return QSize();
 
     const double base = double(std::max(seq_.width, seq_.height));
-    if (base <= 0) return;
-    const double scale = (double(targetSize_) / base) * (settings_.data.scalePercent / 100.0);
+    if (base <= 0) return QSize();
+    const double scale = (double(targetSize_) / base) * (percent / 100.0);
 
-    const int w = std::max(16, int(seq_.width * scale + 0.5));
-    const int h = std::max(16, int(seq_.height * scale + 0.5));
-    window_->resize(w, h);
+    return QSize(std::max(16, int(seq_.width * scale + 0.5)),
+                 std::max(16, int(seq_.height * scale + 0.5)));
+}
+
+void PetController::updateWindowSize() {
+    if (!window_) return;
+    const QSize s = spriteWindowSize(settings_.data.scalePercent);
+    if (s.isEmpty()) return;
+    window_->resize(s);
     refreshRegions();
 }
 
@@ -220,17 +235,31 @@ void PetController::setScalePercent(int percent) {
     const int clamped = std::max(25, std::min(400, percent));
     if (clamped == settings_.data.scalePercent) return;
 
-    // 以窗口中心为锚点：直接 resize 的话会往右下角长，手感很怪
+    // 先把目标尺寸算出来（此时还没写进 settings_），无素材时只记数值不缩窗口
+    const QSize target = spriteWindowSize(clamped);
+    if (target.isEmpty()) {
+        settings_.data.scalePercent = clamped;
+        settings_.save();
+        return;
+    }
+
+    // 以窗口中心为锚点。关键：用**一次** setGeometry 同时完成 move+resize。
+    // 不要 resize() 之后再 move()——那是两次窗口操作，中间会有一帧"按新尺寸停在旧位置"，
+    // 看起来就是抖。
     const QPoint center = window_->geometry().center();
 
     settings_.data.scalePercent = clamped;
-    updateWindowSize();
 
-    const QRect geo = window_->geometry();
-    window_->move(center - QPoint(geo.width() / 2, geo.height() / 2));
-
+    const QPoint topLeft(center.x() - target.width() / 2, center.y() - target.height() / 2);
+    window_->setGeometry(QRect(topLeft, target));
+    refreshRegions();
     settings_.data.pos = window_->pos();
-    settings_.save();
+
+    // 连滚期间冻结穿透翻转（否则窗口尺寸一变，命中判定来回翻转 WS_EX_TRANSPARENT 会闪），
+    // 并且不写盘；停 250ms 后由 zoomSettleTimer_ 统一收尾。
+    zooming_ = true;
+    zoomSettleTimer_->start(250);
+    lastCursor_ = QPoint(-1, -1);   // 缩放结束后强制重新判定一次穿透
 }
 
 bool PetController::animatable() const {
@@ -267,16 +296,15 @@ void PetController::resetPlacement() {
     settings_.data.scalePercent = 100;
     updateWindowSize();
 
-    // ② 位置回到主屏右下角（与首次启动的默认位置一致）
+    // ② 位置重置到屏幕中心（主屏可用区域的正中）
     QScreen* screen = QApplication::primaryScreen();
     const QRect avail = screen ? screen->availableGeometry() : QRect(0, 0, 1920, 1080);
-    window_->move(avail.right() - window_->width() - 60,
-                  avail.bottom() - window_->height() - 60);
+    window_->move(avail.center() - QPoint(window_->width() / 2, window_->height() / 2));
 
     settings_.data.pos = window_->pos();
     settings_.save();
 
-    qInfo().noquote() << QStringLiteral("[pet] 已重置位置与大小 -> %1x%2 @ (%3,%4)")
+    qInfo().noquote() << QStringLiteral("[pet] 已重置到屏幕中心 -> %1x%2 @ (%3,%4)")
                              .arg(window_->width())
                              .arg(window_->height())
                              .arg(window_->x())
@@ -360,8 +388,8 @@ void PetController::onAnimationTick() {
 void PetController::onWatchTick() {
     if (!window_ || !clickThrough_) return;
 
-    // 拖拽中 / 菜单打开时必须保证能收到鼠标
-    if (dragging_ || menuOpen_) {
+    // 拖拽中 / 菜单打开 / 缩放进行中：保证能收到鼠标，且不要反复切窗口样式（切换本身会闪）
+    if (dragging_ || menuOpen_ || zooming_) {
         clickThrough_->setTransparent(false);
         // 失效去重缓存：等状态恢复后必须重新判定一次，否则会一直保持"不穿透"
         lastCursor_ = QPoint(-1, -1);

@@ -118,9 +118,20 @@ void PetWindow::wheelEvent(QWheelEvent* event) {
         return;
     }
 
-    // 一格 = 120，但高分屏触摸板可能是小数值，取整后不足一格按一格算
-    int steps = delta / 120;
-    if (steps == 0) steps = (delta > 0) ? 1 : -1;
+    // 一格 = 120，但高分屏触摸板/自由滚轮可能是很小的数值：
+    // 攒够一定残量才走一格，否则一次滑动会触发几十次缩放，看起来就是在抖。
+    wheelAccum_ += delta;
+    int steps = wheelAccum_ / 120;
+    if (steps != 0) {
+        wheelAccum_ -= steps * 120;
+    } else {
+        if (qAbs(wheelAccum_) < 60) {
+            event->accept();
+            return;                       // 还没攒够一格，先不动
+        }
+        steps = wheelAccum_ > 0 ? 1 : -1;
+        wheelAccum_ = 0;
+    }
 
     emit wheelZoomed(steps);
     event->accept();

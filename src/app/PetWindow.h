@@ -56,6 +56,7 @@ private:
     QRect interactive_;
     bool dragging_ = false;
     QPoint dragOffset_;
+    int wheelAccum_ = 0;   // 滚轮残量：高分辨率滚轮 delta 很小，攒够一格才走一步
 };
 
 } // namespace pic2pet

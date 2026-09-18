@@ -72,6 +72,8 @@ private:
     void updateWindowSize();
     /** 当前是否有可播放的动画（无素材时的程序化圆盘也算） */
     bool animatable() const;
+    /** 指定缩放百分比下的窗口像素尺寸；无素材时返回空 QSize */
+    QSize spriteWindowSize(int percent) const;
     /** 在「有动画 && 未暂停 && 未隐藏」的前提下启动动画定时器；已在跑则什么都不做。
      *  启动前会重置 animClock_，避免恢复播放时 playhead_ 跳一大步。 */
     void resumeAnimation();
@@ -92,6 +94,7 @@ private:
     QTimer* watchTimer_ = nullptr;
     QTimer* perfTimer_ = nullptr;
     QTimer* topmostTimer_ = nullptr;
+    QTimer* zoomSettleTimer_ = nullptr;   // 缩放停顿判定：期间冻结穿透翻转、结束时才写盘
     QSystemTrayIcon* tray_ = nullptr;
     QMenu* trayMenu_ = nullptr;
 
@@ -114,6 +117,7 @@ private:
     qint64 lastRenderedFrames_ = 0;
     bool dragging_ = false;
     bool menuOpen_ = false;
+    bool zooming_ = false;         // 缩放进行中：暂停穿透翻转，避免窗口样式反复切换造成闪动
     QPoint lastCursor_;            // 光标去重：没动就不重复做命中判定
     QRect lastGeo_;
 };

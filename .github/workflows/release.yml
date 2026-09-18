@@ -1,0 +1,84 @@
+name: Release build
+
+# 用法：
+#   1) 在 GitHub 创建仓库并 push 本工程
+#   2) 打 tag：git tag v1.0.0 && git push origin v1.0.0
+#   3) 本 workflow 自动用 MSVC + Qt 编译，把 dist\ 压缩成 zip，挂到同名的 GitHub Release 上
+#   用户点开 Release 即可下载 Pic2Pet-<tag>.zip，解压后双击 Pic2Pet.exe 运行。
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:   # 也允许在 Actions 页面手动触发
+
+permissions:
+  contents: write     # 创建 Release / 上传附件需要
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSVC (cl/link + INCLUDE/LIB)
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install Qt 6.11.2 (msvc2022_64)
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.11.2'
+          host: 'windows'
+          target: 'desktop'
+          arch: 'win64_msvc2022_64'
+          cache: true
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPIC2PET_CONSOLE=OFF
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Deploy (windeployqt + 精简) 与打包
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dist = "dist"
+          if (Test-Path $dist) { Remove-Item $dist -Recurse -Force }
+          New-Item -ItemType Directory -Path $dist | Out-Null
+          Copy-Item "build/src/app/Pic2Pet.exe" "$dist/Pic2Pet.exe"
+
+          windeployqt --release --no-translations --no-system-d3d-compiler `
+            --no-opengl-sw --no-compiler-runtime "$dist/Pic2Pet.exe"
+
+          # 精简：只保留 desktop OpenGL 需要的运行库
+          $prune = @('dxcompiler.dll','dxil.dll','Qt6Network.dll','Qt6Svg.dll','imageformats\qsvg.dll')
+          foreach ($f in $prune) {
+            $p = Join-Path $dist $f
+            if (Test-Path $p) { Remove-Item $p -Force }
+          }
+          foreach ($d in @('generic','iconengines','networkinformation','tls')) {
+            $p = Join-Path $dist $d
+            if (Test-Path $p) { Remove-Item $p -Recurse -Force }
+          }
+
+          # 嵌入应用清单（声明不申请管理员权限 / DPI 感知 / Win10-11 兼容），降低误报
+          mt.exe -manifest "src/app/app.manifest" -outputresource:"dist/Pic2Pet.exe;#1"
+
+          $ver = "${{ github.ref_name }}"
+          Compress-Archive -Path "$dist\*" -DestinationPath "Pic2Pet-$ver.zip" -Force
+          Write-Host "打包完成：Pic2Pet-$ver.zip"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Pic2Pet-${{ github.ref_name }}
+          path: Pic2Pet-${{ github.ref_name }}.zip
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: Pic2Pet-${{ github.ref_name }}.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

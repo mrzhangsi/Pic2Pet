@@ -1,0 +1,5 @@
+#include <windows.h>
+
+// 把 app.manifest 作为 RT_MANIFEST (ID 1) 嵌入 exe：
+// 链接器会优先用这个清单，取代默认清单，从而声明"不申请管理员权限"。
+CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "app.manifest"

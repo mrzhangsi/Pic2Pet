@@ -1,0 +1,14 @@
+build/
+build-release/
+dist/
+out/
+temp/
+参考项目/
+.workbuddy/
+CMakeUserPresets.json
+CMakeCache.txt
+CMakeFiles/
+.vs/
+.vscode/
+.DS_Store
+*.user

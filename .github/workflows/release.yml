@@ -9,6 +9,8 @@ on:
   push:
     tags:
       - 'v*'
+  release:
+    types: [published]   # 在 Releases 页面发布发行版时也触发，自动构建并挂上 zip
   workflow_dispatch:   # 也允许在 Actions 页面手动触发
 
 permissions:
@@ -62,12 +64,19 @@ jobs:
             if (Test-Path $p) { Remove-Item $p -Recurse -Force }
           }
 
-          # 嵌入应用清单（声明不申请管理员权限 / DPI 感知 / Win10-11 兼容），降低误报
-          mt.exe -manifest "src/app/app.manifest" -outputresource:"dist/Pic2Pet.exe;#1"
+          # 嵌入应用清单（声明不申请管理员权限 / DPI 感知 / Win10-11 兼容），降低误报。
+          # Windows SDK 的 mt.exe 可能不在 PATH，缺失则跳过——不阻断打包，仅 SmartScreen 缓解减弱。
+          try {
+            mt.exe -manifest "src/app/app.manifest" -outputresource:"dist/Pic2Pet.exe;#1"
+            Write-Host "应用清单已嵌入"
+          } catch {
+            Write-Warning "mt.exe 不可用，跳过清单嵌入（不影响运行）"
+          }
 
           $ver = "${{ github.ref_name }}"
           Compress-Archive -Path "$dist\*" -DestinationPath "Pic2Pet-$ver.zip" -Force
           Write-Host "打包完成：Pic2Pet-$ver.zip"
+          Get-ChildItem "Pic2Pet-$ver.zip" | Select-Object Name, Length
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4

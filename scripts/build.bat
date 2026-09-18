@@ -9,7 +9,8 @@ rem     scripts\build.bat clean    清空 build 目录
 rem     scripts\build.bat deploy   编译后顺便跑 windeployqt
 rem ============================================================
 
-rem 默认与 CI/Release 一致：Qt 6.11.2。
+rem 本地用 6.11.2（本机已装；>=6.10 都没有透明黑底问题）。
+rem 注意：CI/Release 用 6.10.3 —— 6.11 起 Qt 仓库布局改成单层，aqt 装不上 6.11+。
 rem （6.9.x 有 QTBUG-136098 透明黑底回归，6.10.0 起修复，故不能用 6.9。）
 rem 需要临时切别的版本时： set PIC2PET_QT=D:\QT\6.x.y\msvc2022_64
 if defined PIC2PET_QT (set QT_DIR=%PIC2PET_QT%) else (set QT_DIR=D:\QT\6.11.2\msvc2022_64)

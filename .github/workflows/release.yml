@@ -30,11 +30,18 @@ jobs:
       # 6.10.0 才修复的回归：「无边框 + OpenGL(QOpenGLWidget)」窗口的 alpha 通道
       # 被忽略，导致透明窗口渲染成【黑底】。本项目窗口正是
       # FramelessWindowHint + QOpenGLWidget，所以 6.9.x 全线不可用。
-      # 这里用 6.11.2，与本地开发环境完全一致（本地 6.11.2 已验证透明正常）。
-      - name: Install Qt 6.11.2 (msvc2022_64)
+      #
+      # 为什么是 6.10.3，而不是更新的 6.11.2 / 6.12.0：
+      # 6.11 起 Qt 仓库把 Windows 桌面包改成了「单层」布局
+      # （qt6_6112/ 下直接是 qt6_6112_msvc2022_64/，无嵌套），而 aqtinstall(==3.3.*)
+      # 仍按旧的「双层」路径 qt6_6112/qt6_6112/Updates.xml 去找 → 报
+      # "Failed to locate XML data for Qt version '6.11.2'"（这正是之前发版失败的原因）。
+      # 6.10.3 还是旧布局（qt6_6103/qt6_6103/Updates.xml，含 win64_msvc2022_64），
+      # aqt 能正常安装，且已包含透明修复。
+      - name: Install Qt 6.10.3 (msvc2022_64)
         uses: jurplel/install-qt-action@v4
         with:
-          version: '6.11.2'
+          version: '6.10.3'
           host: 'windows'
           target: 'desktop'
           arch: 'win64_msvc2022_64'

@@ -26,21 +26,19 @@ jobs:
       - name: Setup MSVC (cl/link + INCLUDE/LIB)
         uses: ilammy/msvc-dev-cmd@v1
 
-      # 注意：CI 用 6.9.1 而非本地 6.11.2。
-      # 原因：开源镜像 aqtinstall 默认源尚未同步 6.11.2（报
-      # "Failed to locate XML data for Qt version '6.11.2'"），
-      # 6.9.1 在所有镜像上均齐备，且对本项目用到的 API 完全兼容。
-      # 若想与本地 6.11.2 完全对齐，可改用官方源：
-      #   mirrors: 'https://download.qt.io'
-      # 并保持 version: '6.11.2'。
-      - name: Install Qt 6.9.1 (msvc2022_64)
+      # 必须用 Qt >= 6.10。原因：QTBUG-136098 —— Windows 上 6.9.0 引入、
+      # 6.10.0 才修复的回归：「无边框 + OpenGL(QOpenGLWidget)」窗口的 alpha 通道
+      # 被忽略，导致透明窗口渲染成【黑底】。本项目窗口正是
+      # FramelessWindowHint + QOpenGLWidget，所以 6.9.x 全线不可用。
+      # 这里用 6.11.2，与本地开发环境完全一致（本地 6.11.2 已验证透明正常）。
+      - name: Install Qt 6.11.2 (msvc2022_64)
         uses: jurplel/install-qt-action@v4
         with:
-          version: '6.9.1'
+          version: '6.11.2'
           host: 'windows'
           target: 'desktop'
           arch: 'win64_msvc2022_64'
-          cache: true
+          cache: false   # 关掉缓存：避免命中旧的/不完整的 Qt 缓存导致安装失败
 
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DPIC2PET_CONSOLE=OFF

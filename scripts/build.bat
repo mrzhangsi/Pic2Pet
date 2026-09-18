@@ -9,7 +9,10 @@ rem     scripts\build.bat clean    清空 build 目录
 rem     scripts\build.bat deploy   编译后顺便跑 windeployqt
 rem ============================================================
 
-set QT_DIR=D:\QT\6.11.2\msvc2022_64
+rem 默认与 CI/Release 一致：Qt 6.11.2。
+rem （6.9.x 有 QTBUG-136098 透明黑底回归，6.10.0 起修复，故不能用 6.9。）
+rem 需要临时切别的版本时： set PIC2PET_QT=D:\QT\6.x.y\msvc2022_64
+if defined PIC2PET_QT (set QT_DIR=%PIC2PET_QT%) else (set QT_DIR=D:\QT\6.11.2\msvc2022_64)
 set VS_VCVARS=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat
 
 rem 独立安装的 CMake / Ninja（winget）

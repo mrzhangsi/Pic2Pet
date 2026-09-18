@@ -215,10 +215,22 @@ QSize PetController::spriteWindowSize(int percent) const {
 
     const double base = double(std::max(seq_.width, seq_.height));
     if (base <= 0) return QSize();
-    const double scale = (double(targetSize_) / base) * (percent / 100.0);
+
+    // 用"档位"而不是精确缩放：窗口尺寸只在档位之间跳，档内的连续缩放交给渲染端
+    const double scale = (double(targetSize_) / base) * (bucketFactorFor(percent) / 100.0);
 
     return QSize(std::max(16, int(seq_.width * scale + 0.5)),
                  std::max(16, int(seq_.height * scale + 0.5)));
+}
+
+int PetController::bucketFactorFor(int percent) const {
+    // 档位：1x / 1.5x / 2x / 3x / 4x。下限 100%——缩到 25% 时窗口仍是 1x，
+    // 但这块透明面积在 100% 时本来就有，不额外多占内存。
+    static const int kBuckets[] = { 100, 150, 200, 300, 400 };
+    for (int b : kBuckets) {
+        if (percent <= b) return b;
+    }
+    return kBuckets[4];
 }
 
 void PetController::updateWindowSize() {
@@ -226,6 +238,23 @@ void PetController::updateWindowSize() {
     const QSize s = spriteWindowSize(settings_.data.scalePercent);
     if (s.isEmpty()) return;
     window_->resize(s);
+    applyZoomToRenderer();
+}
+
+void PetController::applyZoomToRenderer() {
+    if (!window_ || !window_->renderer()) return;
+
+    const int bucket = bucketFactorFor(settings_.data.scalePercent);
+    const float scale = float(settings_.data.scalePercent) / float(bucket);   // (0, 1]
+    window_->renderer()->setZoomScale(scale);
+
+    // 精灵在窗口里的实际绘制区域（居中）→ 可交互区跟着它走，
+    // 否则窗口比精灵大出来的透明区域会吃掉鼠标事件
+    const QSize win = window_->size();
+    const int dw = std::max(1, int(win.width() * scale + 0.5f));
+    const int dh = std::max(1, int(win.height() * scale + 0.5f));
+    window_->setSpriteRect(QRect((win.width() - dw) / 2, (win.height() - dh) / 2, dw, dh));
+
     refreshRegions();
 }
 
@@ -235,30 +264,29 @@ void PetController::setScalePercent(int percent) {
     const int clamped = std::max(25, std::min(400, percent));
     if (clamped == settings_.data.scalePercent) return;
 
-    // 先把目标尺寸算出来（此时还没写进 settings_），无素材时只记数值不缩窗口
-    const QSize target = spriteWindowSize(clamped);
-    if (target.isEmpty()) {
-        settings_.data.scalePercent = clamped;
+    settings_.data.scalePercent = clamped;
+
+    const QSize want = spriteWindowSize(clamped);
+    if (want.isEmpty()) {          // 无素材：不涉及窗口，只记下数值
         settings_.save();
         return;
     }
 
-    // 以窗口中心为锚点。关键：用**一次** setGeometry 同时完成 move+resize。
-    // 不要 resize() 之后再 move()——那是两次窗口操作，中间会有一帧"按新尺寸停在旧位置"，
-    // 看起来就是抖。
-    const QPoint center = window_->geometry().center();
+    if (want != window_->size()) {
+        // 只有跨档才动窗口——这是闪烁的唯一来源，所以一档只发生一次。
+        // 档内的连续缩放全部交给渲染端 uScale：零 resize、零闪烁。
+        // 用一次 setGeometry 同时完成 move+resize（分两次操作中间会有一帧停在旧位置）。
+        const QPoint center = window_->geometry().center();
+        const QPoint topLeft(center.x() - want.width() / 2, center.y() - want.height() / 2);
+        window_->setGeometry(QRect(topLeft, want));
+        // 尺寸刚变过，同步重绘一帧，减少合成器显示"还没画内容"的空白帧
+        if (window_->renderer()) window_->renderer()->repaint();
+    }
 
-    settings_.data.scalePercent = clamped;
-
-    const QPoint topLeft(center.x() - target.width() / 2, center.y() - target.height() / 2);
-    window_->setGeometry(QRect(topLeft, target));
-    refreshRegions();
-    // 尺寸刚变过，立刻同步重绘一帧，避免合成器先显示一帧还没画内容的空白窗口（也是"闪一下"的来源之一）
-    if (window_->renderer()) window_->renderer()->repaint();
+    applyZoomToRenderer();          // 无论是否跨档，都要更新渲染缩放与可交互区
     settings_.data.pos = window_->pos();
 
-    // 连滚期间冻结穿透翻转（否则窗口尺寸一变，命中判定来回翻转 WS_EX_TRANSPARENT 会闪），
-    // 并且不写盘；停 250ms 后由 zoomSettleTimer_ 统一收尾。
+    // 连滚期间冻结穿透翻转，并且不写盘；停 250ms 后由 zoomSettleTimer_ 统一收尾。
     zooming_ = true;
     zoomSettleTimer_->start(250);
     lastCursor_ = QPoint(-1, -1);   // 缩放结束后强制重新判定一次穿透
@@ -294,14 +322,20 @@ void PetController::setPaused(bool paused) {
 void PetController::resetPlacement() {
     if (!window_) return;
 
-    // ① 缩放回到 100%
+    // 缩放回到 100%（即 1x 档）
     settings_.data.scalePercent = 100;
-    updateWindowSize();
 
-    // ② 位置重置到屏幕中心（主屏可用区域的正中）
     QScreen* screen = QApplication::primaryScreen();
     const QRect avail = screen ? screen->availableGeometry() : QRect(0, 0, 1920, 1080);
-    window_->move(avail.center() - QPoint(window_->width() / 2, window_->height() / 2));
+
+    const QSize want = spriteWindowSize(100);
+    const QSize target = want.isEmpty() ? window_->size() : want;
+    const QPoint topLeft(avail.center().x() - target.width() / 2,
+                         avail.center().y() - target.height() / 2);
+
+    // 一次 setGeometry 同时完成 move+resize
+    window_->setGeometry(QRect(topLeft, target));
+    applyZoomToRenderer();
 
     settings_.data.pos = window_->pos();
     settings_.save();

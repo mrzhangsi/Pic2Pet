@@ -72,8 +72,13 @@ private:
     void updateWindowSize();
     /** 当前是否有可播放的动画（无素材时的程序化圆盘也算） */
     bool animatable() const;
-    /** 指定缩放百分比下的窗口像素尺寸；无素材时返回空 QSize */
+    /** 指定缩放百分比下的窗口像素尺寸；无素材时返回空 QSize。
+     *  注意：用的是"档位"尺寸，不是精确尺寸——档内缩放由渲染端做，不动窗口。 */
     QSize spriteWindowSize(int percent) const;
+    /** 缩放档位（%）：窗口尺寸只在这些档之间跳，跨档才 resize（故一档只闪一次） */
+    int bucketFactorFor(int percent) const;
+    /** 把当前缩放应用到渲染端（uScale），并按"精灵实际绘制区域"重算可交互区 */
+    void applyZoomToRenderer();
     /** 在「有动画 && 未暂停 && 未隐藏」的前提下启动动画定时器；已在跑则什么都不做。
      *  启动前会重置 animClock_，避免恢复播放时 playhead_ 跳一大步。 */
     void resumeAnimation();

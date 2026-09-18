@@ -31,6 +31,13 @@ public:
     /** 可交互区域（逻辑坐标，相对窗口）；M2 会由角色包围盒自动生成 */
     QRect interactiveRect() const { return interactive_; }
 
+    /**
+     * 设置精灵在窗口内的实际绘制区域（逻辑坐标，相对窗口）。
+     * 「分级扩容」下窗口可能远大于精灵，可交互区必须跟着精灵走，
+     * 否则大窗口的透明区域会把鼠标事件吃掉。传 invalid QRect 则退回"窗口中心 70%"。
+     */
+    void setSpriteRect(const QRect& r);
+
 signals:
     void dragStarted();
     void dragEnded();
@@ -54,6 +61,7 @@ private:
 
     PetRenderer* renderer_ = nullptr;
     QRect interactive_;
+    QRect spriteRect_;     // 精灵实际绘制区域；invalid 时按整窗中心 70% 兜底
     bool dragging_ = false;
     QPoint dragOffset_;
     int wheelAccum_ = 0;   // 滚轮残量：高分辨率滚轮 delta 很小，攒够一格才走一步

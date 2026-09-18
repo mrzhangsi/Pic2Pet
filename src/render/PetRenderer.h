@@ -43,8 +43,17 @@ public:
      */
     void showFrame(int index);
 
-    /** 实际上传到 GPU 的最后一帧，-1 表示还没上传过 */
+    /**
+     * 实际上传到 GPU 的最后一帧，-1 表示还没上传过 */
     int uploadedFrame() const { return uploadedFrame_; }
+
+    /**
+     * 精灵在视口内的缩放（1.0 = 铺满窗口）。
+     * 「分级扩容」用：窗口尺寸只按档位变化，档内的连续缩放靠这个值在渲染端完成，
+     * 避免频繁 resize 窗口造成闪烁。取值 (0, 1]。
+     */
+    void setZoomScale(float s);
+    float zoomScale() const { return zoomScale_; }
 
     int frameCount() const { return frames_; }
     QString glInfo() const { return glInfo_; }
@@ -76,6 +85,7 @@ private:
     int uploadedFrame_ = -1;     // 已上传 GPU 的帧
     GLuint texture_ = 0;
     bool textureAllocated_ = false;
+    float zoomScale_ = 1.0f;     // 精灵在视口内的相对缩放，(0,1]
 };
 
 } // namespace pic2pet

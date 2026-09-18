@@ -52,13 +52,16 @@ void main() {
 
 // M1 精灵着色器：只做纹理采样 + alpha 丢弃。
 // 注意没有做 gamma / 颜色空间转换——素材本身就是 sRGB，这里原样输出即可。
+// uScale：精灵在视口内的相对缩放（1.0 = 铺满）。用于「分级扩容」——窗口尺寸只按档位变化，
+// 档内的连续缩放靠这里做，避免频繁 resize 窗口导致闪烁。
 const char* kSpriteVertexShader = R"(
 attribute vec2 aPos;
 attribute vec2 aTex;
+uniform float uScale;
 varying vec2 vUv;
 void main() {
     vUv = aTex;
-    gl_Position = vec4(aPos, 0.0, 1.0);
+    gl_Position = vec4(aPos * uScale, 0.0, 1.0);
 }
 )";
 
@@ -120,6 +123,15 @@ void PetRenderer::clearSprite() {
     pendingFrame_ = -1;
     uploadedFrame_ = -1;
     textureAllocated_ = false;
+    update();
+}
+
+void PetRenderer::setZoomScale(float s) {
+    if (!(s > 0.0f)) s = 0.0001f;   // 同时挡住 <=0 与 NaN
+    if (s > 1.0f) s = 1.0f;
+    if (qFuzzyCompare(zoomScale_, s)) return;
+
+    zoomScale_ = s;
     update();
 }
 
@@ -282,6 +294,7 @@ void PetRenderer::paintGL() {
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, texture_);
         spriteProgram_.setUniformValue("uTex", 0);
+        spriteProgram_.setUniformValue("uScale", zoomScale_);
 
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 

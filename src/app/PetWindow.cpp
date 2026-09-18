@@ -37,11 +37,19 @@ PetWindow::PetWindow(int size, QWidget* parent) : QWidget(parent) {
     updateInteractiveRect();
 }
 
+void PetWindow::setSpriteRect(const QRect& r) {
+    spriteRect_ = r;
+    updateInteractiveRect();
+}
+
 void PetWindow::updateInteractiveRect() {
-    // 角色大致占窗口中心 70%；M2 换成真实包围盒
-    const int w = width();
-    const int h = height();
-    interactive_ = QRect(int(w * 0.15), int(h * 0.15), int(w * 0.70), int(h * 0.70));
+    // 有精灵实际绘制区域就按它算，否则退回"窗口中心 70%"
+    // （分级扩容下窗口可能远大于精灵，不跟着精灵走的话透明区会吃掉鼠标）
+    const QRect base = spriteRect_.isValid() ? spriteRect_ : QRect(0, 0, width(), height());
+    interactive_ = QRect(base.x() + int(base.width() * 0.15),
+                         base.y() + int(base.height() * 0.15),
+                         int(base.width() * 0.70),
+                         int(base.height() * 0.70));
 }
 
 void PetWindow::mousePressEvent(QMouseEvent* event) {

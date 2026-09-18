@@ -28,8 +28,8 @@ void Settings::load() {
     QSettings s(filePath_, QSettings::IniFormat);
 
     data.scalePercent = s.value(QStringLiteral("view/scalePercent"), 100).toInt();
-    if (data.scalePercent < 25) data.scalePercent = 25;
-    if (data.scalePercent > 400) data.scalePercent = 400;
+    if (data.scalePercent < kMinScalePercent) data.scalePercent = kMinScalePercent;
+    if (data.scalePercent > kMaxScalePercent) data.scalePercent = kMaxScalePercent;
 
     data.opacity = s.value(QStringLiteral("view/opacity"), 1.0).toDouble();
     if (data.opacity < 0.1) data.opacity = 0.1;

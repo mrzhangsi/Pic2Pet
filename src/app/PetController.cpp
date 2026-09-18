@@ -210,32 +210,23 @@ void PetController::applySequence() {
     }
 }
 
-QSize PetController::spriteWindowSize(int percent) const {
+QSize PetController::spriteWindowSize() const {
     if (!seq_.isValid()) return QSize();
 
     const double base = double(std::max(seq_.width, seq_.height));
     if (base <= 0) return QSize();
 
-    // 用"档位"而不是精确缩放：窗口尺寸只在档位之间跳，档内的连续缩放交给渲染端
-    const double scale = (double(targetSize_) / base) * (bucketFactorFor(percent) / 100.0);
+    // 固定按**最大**缩放预留：缩放过程中窗口尺寸永不变化 —— 这是"完全不闪"的前提。
+    // （Windows 上只要改窗口尺寸，透明 + OpenGL 窗口的合成表面就要重建，必然闪一帧。）
+    const double scale = (double(targetSize_) / base) * (kMaxScalePercent / 100.0);
 
     return QSize(std::max(16, int(seq_.width * scale + 0.5)),
                  std::max(16, int(seq_.height * scale + 0.5)));
 }
 
-int PetController::bucketFactorFor(int percent) const {
-    // 档位：1x / 1.5x / 2x / 3x / 4x。下限 100%——缩到 25% 时窗口仍是 1x，
-    // 但这块透明面积在 100% 时本来就有，不额外多占内存。
-    static const int kBuckets[] = { 100, 150, 200, 300, 400 };
-    for (int b : kBuckets) {
-        if (percent <= b) return b;
-    }
-    return kBuckets[4];
-}
-
 void PetController::updateWindowSize() {
     if (!window_) return;
-    const QSize s = spriteWindowSize(settings_.data.scalePercent);
+    const QSize s = spriteWindowSize();
     if (s.isEmpty()) return;
     window_->resize(s);
     applyZoomToRenderer();
@@ -244,8 +235,8 @@ void PetController::updateWindowSize() {
 void PetController::applyZoomToRenderer() {
     if (!window_ || !window_->renderer()) return;
 
-    const int bucket = bucketFactorFor(settings_.data.scalePercent);
-    const float scale = float(settings_.data.scalePercent) / float(bucket);   // (0, 1]
+    // 窗口已按最大缩放预留，所以渲染缩放 = 当前% / 最大%，恒在 (0, 1]
+    const float scale = float(settings_.data.scalePercent) / float(kMaxScalePercent);
     window_->renderer()->setZoomScale(scale);
 
     // 精灵在窗口里的实际绘制区域（居中）→ 可交互区跟着它走，
@@ -261,32 +252,23 @@ void PetController::applyZoomToRenderer() {
 void PetController::setScalePercent(int percent) {
     if (!window_) return;
 
-    const int clamped = std::max(25, std::min(400, percent));
+    const int clamped = std::max(kMinScalePercent, std::min(kMaxScalePercent, percent));
     if (clamped == settings_.data.scalePercent) return;
 
     settings_.data.scalePercent = clamped;
 
-    const QSize want = spriteWindowSize(clamped);
-    if (want.isEmpty()) {          // 无素材：不涉及窗口，只记下数值
+    // 窗口已按最大缩放固定预留 → 这里**完全不碰窗口**，所以一次都不会闪。
+    // 缩放的全部视觉变化由渲染端 uScale 完成。
+    if (!seq_.isValid()) {          // 无素材：不涉及渲染，只记下数值
         settings_.save();
         return;
     }
 
-    if (want != window_->size()) {
-        // 只有跨档才动窗口——这是闪烁的唯一来源，所以一档只发生一次。
-        // 档内的连续缩放全部交给渲染端 uScale：零 resize、零闪烁。
-        // 用一次 setGeometry 同时完成 move+resize（分两次操作中间会有一帧停在旧位置）。
-        const QPoint center = window_->geometry().center();
-        const QPoint topLeft(center.x() - want.width() / 2, center.y() - want.height() / 2);
-        window_->setGeometry(QRect(topLeft, want));
-        // 尺寸刚变过，同步重绘一帧，减少合成器显示"还没画内容"的空白帧
-        if (window_->renderer()) window_->renderer()->repaint();
-    }
-
-    applyZoomToRenderer();          // 无论是否跨档，都要更新渲染缩放与可交互区
+    applyZoomToRenderer();
     settings_.data.pos = window_->pos();
 
-    // 连滚期间冻结穿透翻转，并且不写盘；停 250ms 后由 zoomSettleTimer_ 统一收尾。
+    // 缩放让精灵尺寸变化 → 可交互区跟着变；期间冻结穿透翻转，避免来回切窗口样式，
+    // 停 250ms 后再统一收尾（含写盘）。
     zooming_ = true;
     zoomSettleTimer_->start(250);
     lastCursor_ = QPoint(-1, -1);   // 缩放结束后强制重新判定一次穿透
@@ -322,20 +304,13 @@ void PetController::setPaused(bool paused) {
 void PetController::resetPlacement() {
     if (!window_) return;
 
-    // 缩放回到 100%（即 1x 档）
+    // 缩放回到 100%。窗口尺寸固定不变，所以这里只移动、不 resize —— 也就不会闪。
     settings_.data.scalePercent = 100;
+    if (seq_.isValid()) applyZoomToRenderer();
 
     QScreen* screen = QApplication::primaryScreen();
     const QRect avail = screen ? screen->availableGeometry() : QRect(0, 0, 1920, 1080);
-
-    const QSize want = spriteWindowSize(100);
-    const QSize target = want.isEmpty() ? window_->size() : want;
-    const QPoint topLeft(avail.center().x() - target.width() / 2,
-                         avail.center().y() - target.height() / 2);
-
-    // 一次 setGeometry 同时完成 move+resize
-    window_->setGeometry(QRect(topLeft, target));
-    applyZoomToRenderer();
+    window_->move(avail.center() - QPoint(window_->width() / 2, window_->height() / 2));
 
     settings_.data.pos = window_->pos();
     settings_.save();
@@ -536,7 +511,7 @@ void PetController::rebuildMenu(QMenu* menu) {
     auto* scaleMenu = menu->addMenu(QStringLiteral("缩放"));
     auto* scaleGroup = new QActionGroup(scaleMenu);
     scaleGroup->setExclusive(true);
-    for (int pct : { 50, 75, 100, 150, 200, 300 }) {
+    for (int pct : { 50, 75, 100, 150, 200 }) {
         auto* a = scaleMenu->addAction(QString::number(pct) + QLatin1Char('%'));
         a->setCheckable(true);
         a->setChecked(settings_.data.scalePercent == pct);

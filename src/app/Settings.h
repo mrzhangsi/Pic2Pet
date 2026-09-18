@@ -6,6 +6,14 @@
 
 namespace pic2pet {
 
+/**
+ * 缩放范围（%）。
+ * 注意：窗口尺寸按**上限**固定预留，缩放时永不 resize —— 这是"完全不闪"的前提，
+ * 所以这个上限直接决定窗口大小与常驻内存（200% → 默认基准 360 时窗口固定 720²）。
+ */
+constexpr int kMinScalePercent = 25;
+constexpr int kMaxScalePercent = 200;
+
 /** 持久化到 INI 的那点偏好 */
 struct PetSettingsData {
     QPoint pos;                       // 窗口位置，无效则用右下角默认位置

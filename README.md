@@ -58,7 +58,17 @@ Pic2Pet.exe --no-tray              REM 不显示托盘
 
 ## ⚖️ 许可
 
-本项目代码许可待定。移植部分保留上游署名：Petra (MIT)、Anime2.5DRig (MIT)、ag-psd (MIT)、desktop-pet2 (MIT)。注意 desktop-pet1 为 GPL-3.0，未参考其代码。使用 Qt 6 时若采用 LGPLv3 需动态链接并随附许可声明。
+本项目代码以 **Apache License 2.0** 发布（见仓库根目录 `LICENSE`）。
+
+移植部分保留各自上游许可与署名：
+- **Petra** (MIT)
+- **Anime2.5DRig** (MIT)
+- **ag-psd** (MIT)
+- **desktop-pet2** (MIT)
+
+> 注意：**desktop-pet1 为 GPL-3.0，本项目未参考其任何代码**，故不受其传染性条款约束。
+
+使用 Qt 6 时遵循其许可（LGPLv3 或商业许可）；若采用 LGPLv3，需动态链接 Qt 并随附相应许可声明。
 
 ## 🔧 给开发者
 

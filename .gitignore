@@ -12,6 +12,8 @@ CMakeFiles/
 .vscode/
 .DS_Store
 *.user
+v1*
+Pic2Pet-*.zip
 
 # 本地保留、不纳入版本库
 技术方案.md

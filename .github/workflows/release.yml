@@ -26,10 +26,17 @@ jobs:
       - name: Setup MSVC (cl/link + INCLUDE/LIB)
         uses: ilammy/msvc-dev-cmd@v1
 
-      - name: Install Qt 6.11.2 (msvc2022_64)
+      # 注意：CI 用 6.9.1 而非本地 6.11.2。
+      # 原因：开源镜像 aqtinstall 默认源尚未同步 6.11.2（报
+      # "Failed to locate XML data for Qt version '6.11.2'"），
+      # 6.9.1 在所有镜像上均齐备，且对本项目用到的 API 完全兼容。
+      # 若想与本地 6.11.2 完全对齐，可改用官方源：
+      #   mirrors: 'https://download.qt.io'
+      # 并保持 version: '6.11.2'。
+      - name: Install Qt 6.9.1 (msvc2022_64)
         uses: jurplel/install-qt-action@v4
         with:
-          version: '6.11.2'
+          version: '6.9.1'
           host: 'windows'
           target: 'desktop'
           arch: 'win64_msvc2022_64'

@@ -71,14 +71,9 @@ jobs:
             if (Test-Path $p) { Remove-Item $p -Recurse -Force }
           }
 
-          # 嵌入应用清单（声明不申请管理员权限 / DPI 感知 / Win10-11 兼容），降低误报。
-          # Windows SDK 的 mt.exe 可能不在 PATH，缺失则跳过——不阻断打包，仅 SmartScreen 缓解减弱。
-          try {
-            mt.exe -manifest "src/app/app.manifest" -outputresource:"dist/Pic2Pet.exe;#1"
-            Write-Host "应用清单已嵌入"
-          } catch {
-            Write-Warning "mt.exe 不可用，跳过清单嵌入（不影响运行）"
-          }
+          # 应用清单（asInvoker / DPI / Win10-11 supportedOS）已在链接期由 app.rc 焊死进 exe，
+          # 不再依赖 mt.exe 后处理（CI runner 上 mt.exe 常不在 PATH，会导致发布版缺清单、
+          # Win10/11 下分层透明窗口变黑底）。这里无需再做任何清单操作。
 
           $ver = "${{ github.ref_name }}"
           Compress-Archive -Path "$dist\*" -DestinationPath "Pic2Pet-$ver.zip" -Force

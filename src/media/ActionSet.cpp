@@ -154,23 +154,41 @@ bool ActionSet::load(const QString& path, QString* error) {
         idle_ = c;
     }
 
-    // 没有待机动作 → 用第一个可用动作兜底，避免"加载成功却什么都不显示"
-    if (!idle_.isValid()) {
-        if (click_.isValid()) {
-            idle_ = click_;
-            idle_.loop = true;
-        } else if (doubleClick_.isValid()) {
-            idle_ = doubleClick_;
-            idle_.loop = true;
-        } else if (drag_.isValid()) {
-            idle_ = drag_;
-            idle_.loop = true;
-        }
-    }
+    ensureIdle();
 
     if (!idle_.isValid()) {
         if (error) *error = QStringLiteral("没有可播放的动作");
         return false;
+    }
+    return true;
+}
+
+void ActionSet::ensureIdle() {
+    if (idle_.isValid()) return;
+
+    // 没有待机动作 → 用第一个可用动作兜底，避免"加载成功却什么都不显示"
+    if (click_.isValid()) {
+        idle_ = click_;
+    } else if (doubleClick_.isValid()) {
+        idle_ = doubleClick_;
+    } else if (drag_.isValid()) {
+        idle_ = drag_;
+    }
+    if (idle_.isValid()) idle_.loop = true;   // 待机一定循环
+}
+
+bool ActionSet::setActionFromPath(PetAction a, const QString& path, QString* error) {
+    ActionClip c;
+    if (!loadClip(path, loopsByDefault(a), &c)) {
+        if (error) *error = QStringLiteral("加载失败：%1").arg(path);
+        return false;
+    }
+
+    switch (a) {
+    case PetAction::Idle:        idle_ = c; break;
+    case PetAction::Click:       click_ = c; break;
+    case PetAction::DoubleClick: doubleClick_ = c; break;
+    case PetAction::Drag:        drag_ = c; break;
     }
     return true;
 }

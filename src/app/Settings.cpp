@@ -39,6 +39,11 @@ void Settings::load() {
     data.lastMedia = s.value(QStringLiteral("media/last")).toString();
     data.recentMedia = s.value(QStringLiteral("media/recent")).toStringList();
 
+    data.actionIdle = s.value(QStringLiteral("actions/idle")).toString();
+    data.actionClick = s.value(QStringLiteral("actions/click")).toString();
+    data.actionDoubleClick = s.value(QStringLiteral("actions/doubleclick")).toString();
+    data.actionDrag = s.value(QStringLiteral("actions/drag")).toString();
+
     const int x = s.value(QStringLiteral("window/x"), -1).toInt();
     const int y = s.value(QStringLiteral("window/y"), -1).toInt();
     if (x >= 0 && y >= 0) data.pos = QPoint(x, y);
@@ -52,6 +57,11 @@ void Settings::save() {
     s.setValue(QStringLiteral("window/alwaysOnTop"), data.alwaysOnTop);
     s.setValue(QStringLiteral("media/last"), data.lastMedia);
     s.setValue(QStringLiteral("media/recent"), data.recentMedia);
+
+    s.setValue(QStringLiteral("actions/idle"), data.actionIdle);
+    s.setValue(QStringLiteral("actions/click"), data.actionClick);
+    s.setValue(QStringLiteral("actions/doubleclick"), data.actionDoubleClick);
+    s.setValue(QStringLiteral("actions/drag"), data.actionDrag);
 
     s.setValue(QStringLiteral("window/x"), data.pos.x());
     s.setValue(QStringLiteral("window/y"), data.pos.y());

@@ -18,6 +18,7 @@ class QTimer;
 
 namespace pic2pet {
 
+class ActionSettingsDialog;
 class PetWindow;
 
 /**
@@ -48,6 +49,9 @@ public:
     /** 抓取当前渲染结果（离屏，不依赖窗口是否可见），用于自动化验证渲染路径 */
     bool grabFramebuffer(const QString& path);
 
+    /** 打开"动作设置"窗口（按需创建、关闭即释放） */
+    void openActionSettings();
+
     /** 加载素材（文件或目录）。失败返回 false 并把原因写进 lastError() */
     bool loadMedia(const QString& path);
     QString lastError() const { return lastError_; }
@@ -74,6 +78,11 @@ private:
     /** 切到某个动作：换序列、按 loop 决定播完是否回待机。
      *  force=true 时即使已经在放同一个循环动作也重新从头播。 */
     void playAction(PetAction a, bool force = false);
+    /** 由「base 路径的命名约定 + 设置里的逐项覆盖」组合出动作集。
+     *  base 挂了但覆盖项齐备时仍算成功。失败时把原因写进 *error。 */
+    bool composeActions(const QString& base, ActionSet* out, QString* error) const;
+    /** 用 composeActions(settings.lastMedia) 重建动作集，并立即生效 */
+    void reloadActions();
     void updateWindowSize();
     /** 当前是否有可播放的动画（无素材时的程序化圆盘也算） */
     bool animatable() const;
@@ -106,6 +115,8 @@ private:
     QTimer* actionHoldTimer_ = nullptr;   // 静态的一次性动作：停一下再回待机
     QSystemTrayIcon* tray_ = nullptr;
     QMenu* trayMenu_ = nullptr;
+    // 动作设置窗口：无父对象 + WA_DeleteOnClose，关闭即自删；靠 destroyed() 信号置空
+    ActionSettingsDialog* actionDialog_ = nullptr;
 
     QElapsedTimer animClock_;
     mutable PerfProbe probe_;

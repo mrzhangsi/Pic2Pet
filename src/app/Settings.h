@@ -17,11 +17,17 @@ constexpr int kMaxScalePercent = 200;
 /** 持久化到 INI 的那点偏好 */
 struct PetSettingsData {
     QPoint pos;                       // 窗口位置，无效则用右下角默认位置
-    int scalePercent = 100;           // 缩放，25~400
+    int scalePercent = 100;           // 缩放，kMinScalePercent~kMaxScalePercent
     double opacity = 1.0;             // 0.1~1.0
     bool alwaysOnTop = true;
-    QString lastMedia;                // 上次加载的素材
+    QString lastMedia;                // 上次加载的素材/宠物文件夹
     QStringList recentMedia;          // 最近 5 个
+
+    // 每个动作的"指定素材"。留空 = 沿用宠物文件夹里的命名约定（idle.gif / click.gif / ...）
+    QString actionIdle;
+    QString actionClick;
+    QString actionDoubleClick;
+    QString actionDrag;
 };
 
 /**

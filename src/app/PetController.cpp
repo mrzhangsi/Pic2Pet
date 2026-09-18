@@ -1,5 +1,6 @@
 #include "PetController.h"
 
+#include "ActionSettingsDialog.h"
 #include "AutoStart.h"
 #include "MediaLoader.h"
 #include "PetRenderer.h"
@@ -159,22 +160,65 @@ bool PetController::grabFramebuffer(const QString& path) {
     return img.save(path, "PNG");
 }
 
+bool PetController::composeActions(const QString& base, ActionSet* out, QString* error) const {
+    ActionSet set;
+    QString baseErr;
+
+    if (!base.isEmpty()) {
+        if (!set.load(base, &baseErr)) {
+            // 基础路径挂了不代表没救：也许"动作设置"里逐项都指定了
+            set = ActionSet();
+        } else {
+            baseErr.clear();
+        }
+    }
+
+    struct Override {
+        PetAction action;
+        const QString* path;
+    };
+    const Override kOverrides[] = {
+        { PetAction::Idle,        &settings_.data.actionIdle },
+        { PetAction::Click,       &settings_.data.actionClick },
+        { PetAction::DoubleClick, &settings_.data.actionDoubleClick },
+        { PetAction::Drag,        &settings_.data.actionDrag },
+    };
+    for (const Override& o : kOverrides) {
+        if (o.path->isEmpty()) continue;
+        QString err;
+        if (!set.setActionFromPath(o.action, *o.path, &err)) {
+            qWarning().noquote() << "[pet] 指定动作加载失败：" << err;
+        }
+    }
+
+    set.ensureIdle();   // 覆盖之后才可能出现"有素材但没待机"的情况
+
+    if (!set.isValid()) {
+        if (error) *error = baseErr.isEmpty() ? QStringLiteral("没有可播放的动作") : baseErr;
+        return false;
+    }
+    if (error) error->clear();
+    *out = set;
+    return true;
+}
+
 bool PetController::loadMedia(const QString& path) {
     ActionSet set;
     QString err;
-    if (!set.load(path, &err)) {
+    if (!composeActions(path, &set, &err)) {
         lastError_ = err;
         qWarning().noquote() << "[pet] 加载失败：" << err;
         return false;
     }
 
+    // 记住这份素材/文件夹："动作设置"里的指定项就是在这个基础上逐项覆盖
+    settings_.rememberMedia(path);
+    settings_.save();
+
     actions_ = set;
     lastError_.clear();
     loadNote_.clear();
     paused_ = false;   // 主动换素材视为"我要看它"，自动取消暂停，避免加载后停在空白帧
-
-    settings_.rememberMedia(path);
-    settings_.save();
 
     playAction(PetAction::Idle, true);
 
@@ -193,6 +237,36 @@ bool PetController::loadMedia(const QString& path) {
                .arg(double(actions_.bytes()) / (1024.0 * 1024.0), 0, 'f', 1)
                .arg(actions_.summary());
     return true;
+}
+
+void PetController::reloadActions() {
+    ActionSet set;
+    QString err;
+    if (!composeActions(settings_.data.lastMedia, &set, &err)) {
+        qWarning().noquote() << "[pet] 动作重载失败，保留原有动作集：" << err;
+        return;
+    }
+
+    actions_ = set;
+    playAction(PetAction::Idle, true);   // 从待机重来，避免停在已失效的动作上
+    qInfo().noquote() << QStringLiteral("[pet] 动作已更新 [%1]").arg(actions_.summary());
+}
+
+void PetController::openActionSettings() {
+    if (!actionDialog_) {
+        // 无父窗口：它是普通窗口，不能跟桌宠的"透明/置顶/无边框"缠在一起。
+        // WA_DeleteOnClose + QPointer：关掉即释放，不长期占内存。
+        auto* dlg = new ActionSettingsDialog(&settings_);
+        dlg->setAttribute(Qt::WA_DeleteOnClose);
+        connect(dlg, &ActionSettingsDialog::actionsChanged, this, &PetController::reloadActions);
+        connect(dlg, &ActionSettingsDialog::previewRequested, this,
+                [this](PetAction a) { playAction(a, true); });
+        connect(dlg, &QObject::destroyed, this, [this] { actionDialog_ = nullptr; });
+        actionDialog_ = dlg;
+    }
+    actionDialog_->show();
+    actionDialog_->raise();
+    actionDialog_->activateWindow();
 }
 
 void PetController::playAction(PetAction a, bool force) {
@@ -623,6 +697,8 @@ void PetController::rebuildMenu(QMenu* menu) {
     }
 
     menu->addSeparator();
+
+    menu->addAction(QStringLiteral("动作设置…"), this, [this] { openActionSettings(); });
 
     if (AutoStart::supported()) {
         auto* starter = menu->addAction(QStringLiteral("开机自启"));

@@ -48,6 +48,13 @@ public:
     /** 待机动作（窗口尺寸与兜底都按它来） */
     const ActionClip& idle() const { return idle_; }
 
+    /** 单独指定某个动作的素材（"动作设置"窗口的覆盖项）。loop 按动作语义决定。 */
+    bool setActionFromPath(PetAction a, const QString& path, QString* error = nullptr);
+
+    /** 没有待机动作时，用第一个可用动作兜底。
+     *  load() 内部会调；应用完覆盖项之后也应再调一次。 */
+    void ensureIdle();
+
     bool isValid() const { return idle_.isValid(); }
     /** 所有动作的帧内存合计 */
     qint64 bytes() const;

@@ -9,10 +9,9 @@ rem     scripts\build.bat clean    wipe the build dir
 rem     scripts\build.bat deploy   build, then run windeployqt
 rem ============================================================
 
-rem Local default: Qt 6.11.2 (installed here; everything >= 6.10 is free of the black-bg bug).
-rem NOTE: CI/Release uses 6.10.3 -- Qt changed the repo layout in 6.11, so aqtinstall cannot
-rem       install 6.11+ on CI.
-rem (6.9.x has the QTBUG-136098 transparent-black regression, fixed in 6.10.0, so 6.9 is unusable.)
+rem Local default: Qt 6.11.2 -- same version CI/Release uses.
+rem (6.9.x / 6.10.x have a Windows transparency regression: a frameless + QOpenGLWidget window
+rem  loses its alpha channel and renders with a black background. Fixed in 6.11.)
 rem Override with another version: set PIC2PET_QT=D:\QT\6.x.y\msvc2022_64
 if defined PIC2PET_QT (set QT_DIR=%PIC2PET_QT%) else (set QT_DIR=D:\QT\6.11.2\msvc2022_64)
 set VS_VCVARS=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat

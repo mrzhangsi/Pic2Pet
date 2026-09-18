@@ -26,25 +26,28 @@ jobs:
       - name: Setup MSVC (cl/link + INCLUDE/LIB)
         uses: ilammy/msvc-dev-cmd@v1
 
-      # 必须用 Qt >= 6.10。原因：QTBUG-136098 —— Windows 上 6.9.0 引入、
-      # 6.10.0 才修复的回归：「无边框 + OpenGL(QOpenGLWidget)」窗口的 alpha 通道
-      # 被忽略，导致透明窗口渲染成【黑底】。本项目窗口正是
-      # FramelessWindowHint + QOpenGLWidget，所以 6.9.x 全线不可用。
+      # 必须用 Qt 6.11.x。
       #
-      # 为什么是 6.10.3，而不是更新的 6.11.2 / 6.12.0：
-      # 6.11 起 Qt 仓库把 Windows 桌面包改成了「单层」布局
-      # （qt6_6112/ 下直接是 qt6_6112_msvc2022_64/，无嵌套），而 aqtinstall(==3.3.*)
-      # 仍按旧的「双层」路径 qt6_6112/qt6_6112/Updates.xml 去找 → 报
-      # "Failed to locate XML data for Qt version '6.11.2'"（这正是之前发版失败的原因）。
-      # 6.10.3 还是旧布局（qt6_6103/qt6_6103/Updates.xml，含 win64_msvc2022_64），
-      # aqt 能正常安装，且已包含透明修复。
-      - name: Install Qt 6.10.3 (msvc2022_64)
+      # 1) 为什么不能用 6.9.x / 6.10.x：
+      #    Windows 上存在透明回归（QTBUG-136098 / QTBUG-136825）：「无边框 + OpenGL
+      #    (QOpenGLWidget)」窗口的 alpha 通道被忽略，透明窗口渲染成【黑底】。
+      #    本项目窗口正是 FramelessWindowHint + QOpenGLWidget。
+      #    本地实测对照：6.11.2 打包 = 透明正常；CI 的 6.10.3 = 黑底。=> 修复在 6.11。
+      #
+      # 2) 为什么这里要从 git 装 aqtinstall：
+      #    Qt 6.11 起仓库布局改了（Updates.xml 从 qt6_6112/qt6_6112/ 挪到了
+      #    qt6_6112/qt6_6112_msvc2022_64/），而 aqtinstall 的正式版 3.3.0 仍按旧路径找，
+      #    会报 "Failed to locate XML data for Qt version '6.11.2'"。
+      #    该修复（"Support Qt 6.11+ for Windows X64", PR #1000）已进 aqtinstall master、
+      #    但尚未发新版，所以用 aqtsource 从 git 安装（aqtversion 此时被忽略）。
+      - name: Install Qt 6.11.2 (msvc2022_64)
         uses: jurplel/install-qt-action@v4
         with:
-          version: '6.10.3'
+          version: '6.11.2'
           host: 'windows'
           target: 'desktop'
           arch: 'win64_msvc2022_64'
+          aqtsource: 'git+https://github.com/miurahr/aqtinstall.git@master'
           cache: false   # 关掉缓存：避免命中旧的/不完整的 Qt 缓存导致安装失败
 
       - name: Configure

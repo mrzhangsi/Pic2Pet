@@ -2,25 +2,26 @@
 setlocal
 
 rem ============================================================
-rem  Pic2Pet 构建脚本（Windows / MSVC 2022 / Qt 6 / Ninja）
-rem  用法：
-rem     scripts\build.bat          配置 + 编译
-rem     scripts\build.bat clean    清空 build 目录
-rem     scripts\build.bat deploy   编译后顺便跑 windeployqt
+rem  Pic2Pet build script (Windows / MSVC 2022 / Qt 6 / Ninja)
+rem  Usage:
+rem     scripts\build.bat          configure + build
+rem     scripts\build.bat clean    wipe the build dir
+rem     scripts\build.bat deploy   build, then run windeployqt
 rem ============================================================
 
-rem 本地用 6.11.2（本机已装；>=6.10 都没有透明黑底问题）。
-rem 注意：CI/Release 用 6.10.3 —— 6.11 起 Qt 仓库布局改成单层，aqt 装不上 6.11+。
-rem （6.9.x 有 QTBUG-136098 透明黑底回归，6.10.0 起修复，故不能用 6.9。）
-rem 需要临时切别的版本时： set PIC2PET_QT=D:\QT\6.x.y\msvc2022_64
+rem Local default: Qt 6.11.2 (installed here; everything >= 6.10 is free of the black-bg bug).
+rem NOTE: CI/Release uses 6.10.3 -- Qt changed the repo layout in 6.11, so aqtinstall cannot
+rem       install 6.11+ on CI.
+rem (6.9.x has the QTBUG-136098 transparent-black regression, fixed in 6.10.0, so 6.9 is unusable.)
+rem Override with another version: set PIC2PET_QT=D:\QT\6.x.y\msvc2022_64
 if defined PIC2PET_QT (set QT_DIR=%PIC2PET_QT%) else (set QT_DIR=D:\QT\6.11.2\msvc2022_64)
 set VS_VCVARS=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat
 
-rem 独立安装的 CMake / Ninja（winget）
+rem Standalone CMake / Ninja (winget)
 set CMAKE_EXE=C:\Program Files\CMake\bin\cmake.exe
 set NINJA_EXE=C:\Users\ablkuv\AppData\Local\Microsoft\WinGet\Packages\Ninja-build.Ninja_Microsoft.Winget.Source_8wekyb3d8bbwe\ninja.exe
 
-rem 上面两个找不到时，回退到 Qt 安装器自带的
+rem Fall back to the ones shipped with Qt if the above are missing
 if not exist "%CMAKE_EXE%" if exist "D:\QT\Tools\CMake_64\bin\cmake.exe" set CMAKE_EXE=D:\QT\Tools\CMake_64\bin\cmake.exe
 if not exist "%NINJA_EXE%" if exist "D:\QT\Tools\Ninja\ninja.exe"        set NINJA_EXE=D:\QT\Tools\Ninja\ninja.exe
 
@@ -28,34 +29,34 @@ set ROOT=%~dp0..
 set BUILD=%ROOT%\build
 
 if /i "%1"=="clean" (
-    echo [clean] 删除 %BUILD%
+    echo [clean] removing %BUILD%
     if exist "%BUILD%" rmdir /s /q "%BUILD%"
-    echo [clean] 完成
+    echo [clean] done
     exit /b 0
 )
 
 if not exist "%QT_DIR%\bin\windeployqt.exe" (
-    echo [ERROR] 找不到 Qt：%QT_DIR%
+    echo [ERROR] Qt not found: %QT_DIR%
     exit /b 1
 )
 if not exist "%VS_VCVARS%" (
-    echo [ERROR] 找不到 %VS_VCVARS%
+    echo [ERROR] not found: %VS_VCVARS%
     exit /b 1
 )
 if not exist "%CMAKE_EXE%" (
-    echo [ERROR] 找不到 cmake.exe，请修改脚本里的 CMAKE_EXE
+    echo [ERROR] cmake.exe not found -- edit CMAKE_EXE in this script
     exit /b 1
 )
 if not exist "%NINJA_EXE%" (
-    echo [ERROR] 找不到 ninja.exe，请修改脚本里的 NINJA_EXE
+    echo [ERROR] ninja.exe not found -- edit NINJA_EXE in this script
     exit /b 1
 )
 
-echo [0/3] 初始化 MSVC 环境
+echo [0/3] init MSVC environment
 call "%VS_VCVARS%"
 if errorlevel 1 exit /b 1
 
-rem 显式钉死编译器，防止 PATH 里的 MSYS2/MinGW g++ 被 CMake 误选
+rem Pin the compiler explicitly so a MSYS2/MinGW g++ in PATH is not picked up by CMake
 if defined VCToolsInstallDir (
     set CXX_COMPILER=%VCToolsInstallDir%bin\Hostx64\x64\cl.exe
     set C_COMPILER=%VCToolsInstallDir%bin\Hostx64\x64\cl.exe
@@ -65,12 +66,12 @@ if defined VCToolsInstallDir (
 )
 echo       CXX = %CXX_COMPILER%
 
-rem 开发模式：保留控制台子系统，方便看 [perf] 日志
+rem Dev mode: keep the console subsystem so [perf] logs are visible
 set CONSOLE_FLAG=-DPIC2PET_CONSOLE=ON
 if /i "%1"=="release" set CONSOLE_FLAG=-DPIC2PET_CONSOLE=OFF
 if /i "%1"=="deploy"  set CONSOLE_FLAG=-DPIC2PET_CONSOLE=OFF
 
-echo [1/3] 配置（Ninja / Release）
+echo [1/3] configure (Ninja / Release)
 "%CMAKE_EXE%" -S "%ROOT%" -B "%BUILD%" -G Ninja ^
       -DCMAKE_BUILD_TYPE=Release ^
       -DCMAKE_PREFIX_PATH="%QT_DIR%" ^
@@ -79,24 +80,24 @@ echo [1/3] 配置（Ninja / Release）
       -DCMAKE_CXX_COMPILER="%CXX_COMPILER%" ^
       %CONSOLE_FLAG%
 if errorlevel 1 (
-    echo [ERROR] CMake 配置失败
+    echo [ERROR] cmake configure failed
     exit /b 1
 )
 
-echo [2/3] 编译
+echo [2/3] build
 "%CMAKE_EXE%" --build "%BUILD%"
 if errorlevel 1 (
-    echo [ERROR] 编译失败
+    echo [ERROR] build failed
     exit /b 1
 )
 
-echo [3/3] 完成
-echo      输出：%BUILD%\src\app\Pic2Pet.exe
+echo [3/3] done
+echo      output: %BUILD%\src\app\Pic2Pet.exe
 
 if /i "%1"=="deploy" (
-    echo [deploy] 拷贝 Qt 运行时
+    echo [deploy] copying Qt runtime
     "%QT_DIR%\bin\windeployqt.exe" "%BUILD%\src\app\Pic2Pet.exe"
 )
 
 echo.
-echo [OK] 运行：scripts\run.bat
+echo [OK] run: scripts\run.bat

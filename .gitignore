@@ -12,3 +12,9 @@ CMakeFiles/
 .vscode/
 .DS_Store
 *.user
+
+# 本地保留、不纳入版本库
+技术方案.md
+视频思路.md
+项目思路.md
+test.gif

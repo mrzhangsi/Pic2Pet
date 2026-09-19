@@ -1,14 +1,16 @@
-"""Generate demo action GIFs, for testing the action system.
+"""Generate demo action assets (GIFs + WAVs), for testing the action system.
 
-Creates  temp/demo_pet/  with one GIF per action:
+Creates  temp/demo_pet/  with:
 
     idle.gif         blue,   gentle bobbing        (loop)
     click.gif        orange, quick "pop"           (once)
     doubleclick.gif  purple, spinning              (once)
     drag.gif         green,  sideways wobble       (loop)
+    click.wav / doubleclick.wav / drag.wav         short beeps, one per action
 
 The app only accepts single media FILES, so assign them one by one in the
-"动作设置" window (right-click the pet -> 动作设置…).
+"动作设置" window (right-click the pet -> 动作设置…). Each action takes a media
+file and an audio file, and those two are independent.
 
 Run:  <venv-python> tools/make_demo_pet.py
 Requires: Pillow
@@ -16,6 +18,8 @@ Requires: Pillow
 
 import math
 import os
+import struct
+import wave
 
 from PIL import Image, ImageDraw
 
@@ -57,6 +61,25 @@ def save(frames, name, duration_ms):
     print("wrote", path, "frames=", len(frames))
 
 
+def write_wav(name, freq, ms=180, rate=22050, volume=0.35):
+    """短促的正弦提示音（带淡入淡出，避免咔哒声）"""
+    path = os.path.join(OUT_DIR, name)
+    n = int(rate * ms / 1000.0)
+    fade = max(1, int(rate * 0.01))
+    frames = bytearray()
+    for i in range(n):
+        env = min(1.0, i / fade) * max(0.0, 1.0 - i / float(n))
+        v = int(volume * env * 32767 * math.sin(2 * math.pi * freq * i / rate))
+        frames += struct.pack("<h", v)
+
+    with wave.open(path, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(bytes(frames))
+    print("wrote", path, "ms=", ms)
+
+
 def main():
     os.makedirs(OUT_DIR, exist_ok=True)
 
@@ -83,11 +106,18 @@ def main():
     save([make_frame(GREEN, dx=math.sin(2 * math.pi * i / n) * 14.0) for i in range(n)],
          "drag.gif", 80)
 
+    # 音频：与素材完全独立，可以只配音频
+    write_wav("click.wav", 660.0, 180)
+    write_wav("doubleclick.wav", 880.0, 220)
+    write_wav("drag.wav", 440.0, 140)
+
     print("")
     print("test:")
     print("  1) build\\src\\app\\Pic2Pet.exe --media \"%s\\idle.gif\"" % OUT_DIR)
-    print("  2) right-click the pet -> 动作设置… -> assign the other three GIFs")
-    print("     (or drag any single file onto the pet)")
+    print("  2) right-click the pet -> 动作设置…")
+    print("     click  -> media click.gif       + audio click.wav")
+    print("     double -> media doubleclick.gif + audio doubleclick.wav")
+    print("     drag   -> media drag.gif        + audio drag.wav")
 
 
 if __name__ == "__main__":

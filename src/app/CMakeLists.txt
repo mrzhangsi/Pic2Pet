@@ -26,6 +26,7 @@ target_link_libraries(Pic2Pet
         Pic2Pet::platform
         Pic2Pet::render
         Pic2Pet::media
+        Pic2Pet::input
         Qt6::Core
         Qt6::Gui
         Qt6::Widgets

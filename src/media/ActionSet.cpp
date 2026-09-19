@@ -30,6 +30,7 @@ QString ActionSet::actionName(PetAction a) {
     case PetAction::Click:       return QStringLiteral("单击");
     case PetAction::DoubleClick: return QStringLiteral("双击");
     case PetAction::Drag:        return QStringLiteral("拖拽");
+    case PetAction::Typing:      return QStringLiteral("输入");
     }
     return QStringLiteral("?");
 }
@@ -39,6 +40,7 @@ bool ActionSet::load(const QString& path, QString* error) {
     click_ = ActionClip();
     doubleClick_ = ActionClip();
     drag_ = ActionClip();
+    typing_ = ActionClip();
     if (error) error->clear();
 
     // 只认单个素材文件：它就是这个宠物的待机动作
@@ -61,6 +63,8 @@ void ActionSet::ensureIdle() {
         idle_ = doubleClick_;
     } else if (drag_.isValid()) {
         idle_ = drag_;
+    } else if (typing_.isValid()) {
+        idle_ = typing_;
     }
     if (idle_.isValid()) idle_.loop = true;   // 待机一定循环
 }
@@ -78,6 +82,7 @@ bool ActionSet::setActionFromPath(PetAction a, const QString& path, int holdMs, 
     case PetAction::Click:       click_ = c; break;
     case PetAction::DoubleClick: doubleClick_ = c; break;
     case PetAction::Drag:        drag_ = c; break;
+    case PetAction::Typing:      typing_ = c; break;
     }
     return true;
 }
@@ -89,6 +94,7 @@ void ActionSet::setHoldMs(PetAction a, int holdMs) {
     case PetAction::Click:       click_.holdMs = holdMs; break;
     case PetAction::DoubleClick: doubleClick_.holdMs = holdMs; break;
     case PetAction::Drag:        drag_.holdMs = holdMs; break;
+    case PetAction::Typing:      typing_.holdMs = holdMs; break;
     }
 }
 
@@ -98,6 +104,7 @@ bool ActionSet::has(PetAction a) const {
     case PetAction::Click:       return click_.isValid();
     case PetAction::DoubleClick: return doubleClick_.isValid();
     case PetAction::Drag:        return drag_.isValid();
+    case PetAction::Typing:      return typing_.isValid();
     }
     return false;
 }
@@ -113,6 +120,9 @@ const ActionClip& ActionSet::clip(PetAction a) const {
     case PetAction::Drag:
         if (drag_.isValid()) return drag_;
         break;
+    case PetAction::Typing:
+        if (typing_.isValid()) return typing_;
+        break;
     default:
         break;
     }
@@ -125,6 +135,7 @@ qint64 ActionSet::bytes() const {
     n += click_.seq.bytes();
     n += doubleClick_.seq.bytes();
     n += drag_.seq.bytes();
+    n += typing_.seq.bytes();
     return n;
 }
 
@@ -139,6 +150,7 @@ QString ActionSet::summary() const {
     add("click", click_);
     add("doubleclick", doubleClick_);
     add("drag", drag_);
+    add("typing", typing_);
     return parts.join(QLatin1Char(' '));
 }
 

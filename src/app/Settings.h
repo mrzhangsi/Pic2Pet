@@ -41,6 +41,14 @@ struct PetSettingsData {
     ActionConfig actionClick;
     ActionConfig actionDoubleClick;
     ActionConfig actionDrag;
+    ActionConfig actionTyping;        // 输入模式：敲键盘时触发
+
+    /**
+     * "输入模式"：全局监听键盘，你敲键时桌宠跟着动（触发 actionTyping）。
+     * **默认 false** —— 这是全项目唯一的挂钩式能力，必须用户显式打开，
+     * 且会加重杀软误报（见 src/input/README.md 与 README 的「被报毒」一节）。
+     */
+    bool inputMode = false;
 };
 
 /**

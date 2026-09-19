@@ -3,6 +3,7 @@
 #include "ActionSettingsDialog.h"
 #include "AudioPlayer.h"
 #include "AutoStart.h"
+#include "KeyboardMonitor.h"
 #include "PetRenderer.h"
 #include "PetWindow.h"
 
@@ -42,6 +43,8 @@ constexpr int kAnimationIntervalMs = 16;   // 播放驱动：保持 16ms，不�
 constexpr int kWatchIntervalMs = 32;       // 穿透调度，30Hz 足够；再快只是白烧 CPU
 constexpr int kPerfIntervalMs = 1000;
 constexpr int kTopmostIntervalMs = 2000;
+/** 输入模式下两次"敲键"之间的最小间隔：打字很快时不要每一下都放动画 */
+constexpr int kInputCooldownMs = 150;
 
 // 应用图标来自 app.qrc（src/app/app.ico），窗口图标与托盘图标共用同一份。
 // 若资源缺失（例如有人只拷了 exe），退回一个简单的蓝色圆点，保证托盘不空着。
@@ -137,6 +140,9 @@ void PetController::start(const QString& cliMedia) {
     watchTimer_->start(kWatchIntervalMs);
     perfTimer_->start(kPerfIntervalMs);
     topmostTimer_->start(kTopmostIntervalMs);
+
+    // 输入模式：上次开着的话这里恢复。默认 false，所以正常情况下不会装钩子
+    if (settings_.data.inputMode) setInputMode(true);
 }
 
 void PetController::switchBackend(ClickThroughBackend backend) {
@@ -181,6 +187,7 @@ bool PetController::composeActions(const QString& base, ActionSet* out, QString*
         { PetAction::Click,       &settings_.data.actionClick },
         { PetAction::DoubleClick, &settings_.data.actionDoubleClick },
         { PetAction::Drag,        &settings_.data.actionDrag },
+        { PetAction::Typing,      &settings_.data.actionTyping },
     };
     for (const Override& o : kOverrides) {
         if (o.cfg->media.isEmpty()) {
@@ -329,6 +336,7 @@ QString PetController::audioFor(PetAction a) const {
     case PetAction::Click:       return settings_.data.actionClick.audio;
     case PetAction::DoubleClick: return settings_.data.actionDoubleClick.audio;
     case PetAction::Drag:        return settings_.data.actionDrag.audio;
+    case PetAction::Typing:      return settings_.data.actionTyping.audio;
     }
     return QString();
 }
@@ -627,6 +635,44 @@ void PetController::onDoubleClicked() {
     playAction(PetAction::DoubleClick);
 }
 
+void PetController::setInputMode(bool on) {
+    settings_.data.inputMode = on;
+
+    if (on) {
+        if (!keyboard_) {
+            keyboard_ = new KeyboardMonitor(this);
+            connect(keyboard_, &KeyboardMonitor::keyEvent, this, &PetController::onKeyEvent);
+        }
+
+        QString err;
+        if (!keyboard_->start(&err)) {
+            // 装不上就老实关掉，别留一个"看起来开着其实没生效"的开关
+            qWarning().noquote() << "[pet] 输入模式启动失败：" << err;
+            settings_.data.inputMode = false;
+            settings_.save();
+            return;
+        }
+        qInfo().noquote() << "[pet] 输入模式已开启（" << keyboard_->name() << "）";
+    } else {
+        if (keyboard_) keyboard_->stop();
+        qInfo().noquote() << "[pet] 输入模式已关闭";
+    }
+
+    settings_.save();
+}
+
+void PetController::onKeyEvent(quint32 vk, bool down) {
+    // vk 先留着不用：以后要做"显示按键字符 / 区分修饰键"时从这里接
+    Q_UNUSED(vk);
+    if (!down) return;                            // 只在按下时触发
+
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if (now - lastInputTickMs_ < kInputCooldownMs) return;   // 节流
+    lastInputTickMs_ = now;
+
+    playAction(PetAction::Typing);
+}
+
 void PetController::onFileDropped(const QString& path) {
     qInfo().noquote() << "[pet] 拖入：" << path;
     loadMedia(path);
@@ -700,7 +746,8 @@ void PetController::rebuildMenu(QMenu* menu) {
     if (actions_.isValid()) {
         auto* actionMenu = menu->addMenu(QStringLiteral("动作"));
         const PetAction kAll[] = { PetAction::Idle, PetAction::Click,
-                                   PetAction::DoubleClick, PetAction::Drag };
+                                   PetAction::DoubleClick, PetAction::Drag,
+                                   PetAction::Typing };
         for (PetAction a : kAll) {
             const bool ok = actions_.has(a);
             auto* act = actionMenu->addAction(
@@ -721,6 +768,14 @@ void PetController::rebuildMenu(QMenu* menu) {
     menu->addSeparator();
 
     menu->addAction(QStringLiteral("动作设置…"), this, [this] { openActionSettings(); });
+
+    // 输入模式：全局键盘监听。默认关闭，勾选是唯一开关
+    auto* inputAction = menu->addAction(QStringLiteral("输入模式（跟随键盘）"));
+    inputAction->setCheckable(true);
+    inputAction->setChecked(settings_.data.inputMode);
+    inputAction->setToolTip(QStringLiteral("开启后全局监听键盘（只取虚拟键码，不记录按键内容），"
+                                           "你敲键时桌宠播放「输入」动作。会加重杀软误报。"));
+    connect(inputAction, &QAction::toggled, this, [this](bool on) { setInputMode(on); });
 
     if (AutoStart::supported()) {
         auto* starter = menu->addAction(QStringLiteral("开机自启"));

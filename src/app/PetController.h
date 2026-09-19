@@ -19,6 +19,7 @@ class QTimer;
 namespace pic2pet {
 
 class ActionSettingsDialog;
+class KeyboardMonitor;
 class PetWindow;
 
 /**
@@ -52,6 +53,13 @@ public:
     /** 打开"动作设置"窗口（按需创建、关闭即释放） */
     void openActionSettings();
 
+    /**
+     * 开关"输入模式"：全局监听键盘，敲键时触发「输入」动作。
+     * 这是挂钩式能力，**默认关闭**（settings_.data.inputMode 初始为 false）。
+     */
+    void setInputMode(bool on);
+    bool inputMode() const { return settings_.data.inputMode; }
+
     /** 加载单个素材文件（该文件即待机动作）。失败返回 false 并把原因写进 lastError() */
     bool loadMedia(const QString& path);
     QString lastError() const { return lastError_; }
@@ -68,6 +76,8 @@ private slots:
     void onDragEnded();
     void onClicked();
     void onDoubleClicked();
+    /** 输入模式：收到全局按键（vk 是 Windows 虚拟键码，down=按下） */
+    void onKeyEvent(quint32 vk, bool down);
     void onContextMenu(const QPoint& globalPos);
     void onFileDropped(const QString& path);
     void onWheelZoomed(int steps);
@@ -119,6 +129,8 @@ private:
     QMenu* trayMenu_ = nullptr;
     // 动作设置窗口：无父对象 + WA_DeleteOnClose，关闭即自删；靠 destroyed() 信号置空
     ActionSettingsDialog* actionDialog_ = nullptr;
+    KeyboardMonitor* keyboard_ = nullptr;   // 输入模式用；不启用时根本不创建
+    qint64 lastInputTickMs_ = 0;            // 打字节流的上一次时刻
 
     QElapsedTimer animClock_;
     mutable PerfProbe probe_;

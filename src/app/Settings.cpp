@@ -51,6 +51,9 @@ void Settings::load() {
     loadAction("click", data.actionClick);
     loadAction("doubleclick", data.actionDoubleClick);
     loadAction("drag", data.actionDrag);
+    loadAction("typing", data.actionTyping);
+
+    data.inputMode = s.value(QStringLiteral("input/mode"), false).toBool();
 
     const int x = s.value(QStringLiteral("window/x"), -1).toInt();
     const int y = s.value(QStringLiteral("window/y"), -1).toInt();
@@ -76,6 +79,9 @@ void Settings::save() {
     saveAction("click", data.actionClick);
     saveAction("doubleclick", data.actionDoubleClick);
     saveAction("drag", data.actionDrag);
+    saveAction("typing", data.actionTyping);
+
+    s.setValue(QStringLiteral("input/mode"), data.inputMode);
 
     s.setValue(QStringLiteral("window/x"), data.pos.x());
     s.setValue(QStringLiteral("window/y"), data.pos.y());

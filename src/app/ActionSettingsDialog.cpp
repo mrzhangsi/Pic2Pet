@@ -24,6 +24,7 @@ QString actionHint(PetAction a) {
     case PetAction::Click:       return QStringLiteral("点一下播一次");
     case PetAction::DoubleClick: return QStringLiteral("双击播一次");
     case PetAction::Drag:        return QStringLiteral("拖拽时循环");
+    case PetAction::Typing:      return QStringLiteral("敲键盘时触发");
     }
     return QString();
 }
@@ -41,7 +42,8 @@ QString audioFilter() {
 }
 
 const PetAction kAllActions[] = { PetAction::Idle, PetAction::Click,
-                                  PetAction::DoubleClick, PetAction::Drag };
+                                  PetAction::DoubleClick, PetAction::Drag,
+                                  PetAction::Typing };
 
 QString dim(const QString& text) {
     return QStringLiteral("<span style='color:#888'>%1</span>").arg(text);
@@ -157,7 +159,8 @@ ActionConfig& ActionSettingsDialog::config(PetAction a) {
     case PetAction::Idle:        return settings_->data.actionIdle;
     case PetAction::Click:       return settings_->data.actionClick;
     case PetAction::DoubleClick: return settings_->data.actionDoubleClick;
-    case PetAction::Drag:        return settings_->data.actionDrag;
+    case PetAction::Drag:        return settings_->data.actionDrag; break;
+    case PetAction::Typing:      return settings_->data.actionTyping; break;
     }
     return settings_->data.actionIdle;   // 不可达
 }
@@ -169,6 +172,7 @@ QString ActionSettingsDialog::effectiveMedia(PetAction a) const {
     case PetAction::Click:       cfg = &settings_->data.actionClick; break;
     case PetAction::DoubleClick: cfg = &settings_->data.actionDoubleClick; break;
     case PetAction::Drag:        cfg = &settings_->data.actionDrag; break;
+    case PetAction::Typing:      cfg = &settings_->data.actionTyping; break;
     }
     if (cfg && !cfg->media.isEmpty()) return cfg->media;
     // 待机没单独指定素材时，实际用的是"当前素材"

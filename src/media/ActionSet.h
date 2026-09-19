@@ -12,6 +12,7 @@ enum class PetAction {
     Click,         // 单击
     DoubleClick,   // 双击
     Drag,          // 拖拽中（循环，松手回待机）
+    Typing,        // 输入模式：敲键盘时触发（播一次）
 };
 
 /** 一个动作 = 一段序列 + 播放方式 */
@@ -63,6 +64,7 @@ private:
     ActionClip click_;
     ActionClip doubleClick_;
     ActionClip drag_;
+    ActionClip typing_;
 };
 
 } // namespace pic2pet

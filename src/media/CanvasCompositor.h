@@ -26,11 +26,20 @@ public:
     void reset();
 
     /**
-     * blend_op = SOURCE：把 src 贴到 (dx, dy)。
+     * blend_op = SOURCE 的**GIF 语义**：把 src 贴到 (dx, dy)。
      * 逐像素：src alpha == 0 的像素**跳过**（保留底下已有内容），
      * 这正是 GIF 透明索引的语义。
+     * 注意：APNG 的 blend_op=0 不是这个语义，要用 replaceSource()。
      */
     void blendSource(const uchar* src, int sw, int sh, int dx, int dy);
+
+    /**
+     * APNG blend_op = SOURCE（0）的**规范语义**：**整块替换**。
+     * 与 blendSource 的关键差别：src alpha == 0 的像素也要把目标变透明，
+     * 半透明像素的 alpha 也照抄（不做合成）。
+     * 用错了就会出现"上一帧的残影擦不掉"。
+     */
+    void replaceSource(const uchar* src, int sw, int sh, int dx, int dy);
 
     /** blend_op = OVER：常规 alpha 合成（APNG blend_op=1 用） */
     void blendOver(const uchar* src, int sw, int sh, int dx, int dy);

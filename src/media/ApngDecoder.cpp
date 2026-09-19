@@ -84,13 +84,14 @@ bool splitChunks(const QByteArray& data, QVector<Chunk>& out, int& canvasW, int&
     const qint64 total = data.size();
     canvasW = canvasH = 0;
 
-    while (pos + 8 <= total) {
+    while (pos + 12 <= total) {
         const uchar* p = reinterpret_cast<const uchar*>(data.constData()) + pos;
         const quint32 len = readBigEndianU32(p);
 
         Chunk c;
         c.type = data.mid(int(pos) + 4, 4);
-        if (pos + 8 + qint64(len) > total) return false;
+        // 一个 chunk = 长度(4) + 类型(4) + 数据(len) + CRC(4) = 12 + len
+        if (pos + 12 + qint64(len) > total) return false;
         c.data = data.mid(int(pos) + 8, int(len));
         out.push_back(c);
 
@@ -101,7 +102,7 @@ bool splitChunks(const QByteArray& data, QVector<Chunk>& out, int& canvasW, int&
             canvasH = int(readBigEndianU32(ih + 4));
         }
 
-        pos += 8 + qint64(len);
+        pos += 12 + qint64(len);   // 别忘了 CRC 那 4 字节
         if (c.type == "IEND") break;
     }
     return canvasW > 0 && canvasH > 0;
@@ -134,6 +135,10 @@ bool ApngDecoder::isAnimatedPng(const QByteArray& data) {
         if (c.type == "IDAT") return false;     // acTL 必须出现在 IDAT 之前
     }
     return false;
+}
+
+QString ApngDecoder::notAnimatedError() {
+    return QStringLiteral("这不是动画 PNG（没有 fcTL）");
 }
 
 MediaResult ApngDecoder::decode(const QByteArray& data) {
@@ -202,7 +207,7 @@ MediaResult ApngDecoder::decode(const QByteArray& data) {
     }
 
     if (frames.isEmpty()) {
-        r.error = QStringLiteral("这不是动画 PNG（没有 fcTL）");
+        r.error = notAnimatedError();
         return r;
     }
 
@@ -269,8 +274,9 @@ MediaResult ApngDecoder::decode(const QByteArray& data) {
         if (f.disposeOp == 2) backup = canvas.grab(frameRect);
 
         if (f.blendOp == 0) {
-            canvas.blendSource(reinterpret_cast<const uchar*>(frameBits.constData()),
-                               rgba.width(), rgba.height(), f.x, f.y);
+            // APNG 的 SOURCE 是"整块替换"（透明像素也要盖掉），不能走 GIF 那套跳过透明的语义
+            canvas.replaceSource(reinterpret_cast<const uchar*>(frameBits.constData()),
+                                 rgba.width(), rgba.height(), f.x, f.y);
         } else {
             canvas.blendOver(reinterpret_cast<const uchar*>(frameBits.constData()),
                              rgba.width(), rgba.height(), f.x, f.y);

@@ -44,6 +44,8 @@ bool sendMci(const QString& command, QString* err) {
     return true;
 }
 
+} // namespace
+
 class MciAudioPlayer : public AudioPlayer {
 public:
     QString name() const override { return QStringLiteral("Win32 MCI (winmm)"); }

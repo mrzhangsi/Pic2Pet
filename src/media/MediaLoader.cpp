@@ -108,7 +108,12 @@ MediaResult MediaLoader::loadFile(const QString& path, const Options& opt) {
             a.seq.sourceName = QFileInfo(path).fileName();
             return a;
         }
-        // 不是动画 PNG 就退回静态图处理，而不是报错
+        // 普通 PNG 走"静态图"是**正常路径**，不要报警（否则一张 PNG 就刷一条日志）。
+        // 只有"确实是 APNG 却没解开"才值得报——静默降级会让这种情况看起来像素材本来就是静态图。
+        if (a.error != ApngDecoder::notAnimatedError()) {
+            qWarning().noquote() << "[media] APNG 解码未成功，按静态图处理：" << path
+                                 << "（" << a.error << "）";
+        }
     }
 
     return loadStillImage(path);

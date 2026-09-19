@@ -29,8 +29,10 @@ QString actionHint(PetAction a) {
 }
 
 QString mediaFilter() {
+    // 注意：不含 webp —— Qt 6.11 官方包**没有** WebP 图像插件，解不了。
+    // 要支持就得自己带 libwebp，属于后续里程碑。
     return QStringLiteral(
-        "图片与动图 (*.gif *.png *.apng *.jpg *.jpeg *.bmp *.webp);;所有文件 (*.*)");
+        "图片与动图 (*.gif *.png *.apng *.jpg *.jpeg *.bmp);;所有文件 (*.*)");
 }
 
 QString audioFilter() {

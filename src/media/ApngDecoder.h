@@ -27,6 +27,13 @@ public:
     /** 是否动画 PNG：在 IDAT 之前存在 acTL */
     static bool isAnimatedPng(const QByteArray& data);
 
+    /**
+     * decode() 在"这是一张普通 PNG、不是动画"时返回的错误原文。
+     * 调用方用它区分两种情况：普通 PNG（走到静态图是**正常路径**，不该报警）
+     * 与"确实是 APNG 但没解开"（**必须报警**，否则会静默降级成静态图，极难发现）。
+     */
+    static QString notAnimatedError();
+
     static MediaResult decode(const QByteArray& data);
     static MediaResult decodeFile(const QString& path);
 };

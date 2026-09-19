@@ -66,6 +66,29 @@ void CanvasCompositor::blendSource(const uchar* src, int sw, int sh, int dx, int
     }
 }
 
+void CanvasCompositor::replaceSource(const uchar* src, int sw, int sh, int dx, int dy) {
+    if (buffer_.isEmpty() || sw <= 0 || sh <= 0) return;
+
+    const QRect target = clip(QRect(dx, dy, sw, sh));
+    if (!target.isValid()) return;
+
+    uchar* canvasBits = reinterpret_cast<uchar*>(buffer_.data());
+    const int canvasStride = width_ * 4;
+
+    for (int row = 0; row < target.height(); ++row) {
+        const int sy = target.top() - dy + row;
+        if (sy < 0 || sy >= sh) continue;
+        const int sx = target.left() - dx;
+        if (sx < 0 || sx >= sw) continue;
+
+        uchar* d = canvasBits + (qint64(target.top() + row) * canvasStride) + target.left() * 4;
+        const uchar* s = src + (qint64(sy) * sw * 4) + sx * 4;
+
+        // 无条件整段替换：透明像素也要把目标变透明，半透明像素的 alpha 照抄
+        std::memcpy(d, s, size_t(target.width()) * 4);
+    }
+}
+
 void CanvasCompositor::blendOver(const uchar* src, int sw, int sh, int dx, int dy) {
     if (buffer_.isEmpty() || sw <= 0 || sh <= 0) return;
 

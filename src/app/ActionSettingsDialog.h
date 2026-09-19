@@ -4,14 +4,13 @@
 #include <QHash>
 
 #include "ActionSet.h"
+#include "Settings.h"
 
 class QGroupBox;
 class QLabel;
 class QSpinBox;
 
 namespace pic2pet {
-
-class Settings;
 
 /**
  * 动作设置窗口：给 待机 / 单击 / 双击 / 拖拽 各自配置

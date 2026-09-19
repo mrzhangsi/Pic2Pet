@@ -646,7 +646,7 @@ void PetController::rebuildMenu(QMenu* menu) {
         menuOpen_ = true;
         const QString path = QFileDialog::getOpenFileName(
             window_, QStringLiteral("选择桌宠素材"), QString(),
-            QStringLiteral("图片与动图 (*.gif *.png *.apng *.jpg *.jpeg *.bmp *.webp);;所有文件 (*.*)"));
+            QStringLiteral("图片与动图 (*.gif *.png *.apng *.jpg *.jpeg *.bmp);;所有文件 (*.*)"));
         menuOpen_ = false;
         if (!path.isEmpty()) loadMedia(path);
     });

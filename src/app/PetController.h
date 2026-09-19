@@ -83,6 +83,8 @@ private:
     bool composeActions(const QString& base, ActionSet* out, QString* error) const;
     /** 用 composeActions(settings.lastMedia) 重建动作集，并立即生效 */
     void reloadActions();
+    /** 该动作配的音频文件（空 = 不发声）。音频与素材完全独立。 */
+    QString audioFor(PetAction a) const;
     void updateWindowSize();
     /** 当前是否有可播放的动画（无素材时的程序化圆盘也算） */
     bool animatable() const;
@@ -125,6 +127,7 @@ private:
     ActionSet actions_;             // 待机 / 单击 / 双击 / 拖拽
     PetAction currentAction_ = PetAction::Idle;
     bool loopCurrent_ = true;       // 当前动作是否循环
+    int holdMsCurrent_ = kDefaultHoldMs;   // 当前动作（静态素材）的停留时长
     double playhead_ = 0.0;        // 播放头，始终落在 [0, totalDuration)
     int currentFrame_ = -1;
 

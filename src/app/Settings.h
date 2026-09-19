@@ -14,20 +14,33 @@ namespace pic2pet {
 constexpr int kMinScalePercent = 25;
 constexpr int kMaxScalePercent = 200;
 
+/** 静态素材的"停留时长"范围（毫秒）。action 是一次性动作时，显示这么久再回待机。 */
+constexpr int kMinHoldMs = 50;
+constexpr int kMaxHoldMs = 60000;
+constexpr int kDefaultHoldMs = 600;
+
+/**
+ * 单个动作的配置。**音频与素材完全独立**：可以只配音频不配素材，反之亦然。
+ */
+struct ActionConfig {
+    QString media;                        // 素材文件（图片/动图）；空 = 该动作没有素材
+    QString audio;                        // 音频文件；空 = 不发声
+    int holdMs = kDefaultHoldMs;          // media 是**静态图**时的停留时长（毫秒）
+};
+
 /** 持久化到 INI 的那点偏好 */
 struct PetSettingsData {
     QPoint pos;                       // 窗口位置，无效则用右下角默认位置
     int scalePercent = 100;           // 缩放，kMinScalePercent~kMaxScalePercent
     double opacity = 1.0;             // 0.1~1.0
     bool alwaysOnTop = true;
-    QString lastMedia;                // 上次加载的素材文件
+    QString lastMedia;                // 当前素材文件（也是待机动作的默认素材）
     QStringList recentMedia;          // 最近 5 个
 
-    // 每个动作的"指定素材文件"。留空 = 该动作没有素材（不会播放）
-    QString actionIdle;
-    QString actionClick;
-    QString actionDoubleClick;
-    QString actionDrag;
+    ActionConfig actionIdle;          // 待机：media 为空时用 lastMedia
+    ActionConfig actionClick;
+    ActionConfig actionDoubleClick;
+    ActionConfig actionDrag;
 };
 
 /**

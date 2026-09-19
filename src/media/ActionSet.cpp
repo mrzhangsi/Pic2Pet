@@ -65,12 +65,13 @@ void ActionSet::ensureIdle() {
     if (idle_.isValid()) idle_.loop = true;   // 待机一定循环
 }
 
-bool ActionSet::setActionFromPath(PetAction a, const QString& path, QString* error) {
+bool ActionSet::setActionFromPath(PetAction a, const QString& path, int holdMs, QString* error) {
     ActionClip c;
     if (!loadClip(path, loopsByDefault(a), &c)) {
         if (error) *error = QStringLiteral("加载失败：%1").arg(path);
         return false;
     }
+    if (holdMs > 0) c.holdMs = holdMs;   // 静态素材的停留时长
 
     switch (a) {
     case PetAction::Idle:        idle_ = c; break;
@@ -79,6 +80,16 @@ bool ActionSet::setActionFromPath(PetAction a, const QString& path, QString* err
     case PetAction::Drag:        drag_ = c; break;
     }
     return true;
+}
+
+void ActionSet::setHoldMs(PetAction a, int holdMs) {
+    if (holdMs <= 0) return;
+    switch (a) {
+    case PetAction::Idle:        idle_.holdMs = holdMs; break;
+    case PetAction::Click:       click_.holdMs = holdMs; break;
+    case PetAction::DoubleClick: doubleClick_.holdMs = holdMs; break;
+    case PetAction::Drag:        drag_.holdMs = holdMs; break;
+    }
 }
 
 bool ActionSet::has(PetAction a) const {

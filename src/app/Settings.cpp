@@ -39,10 +39,18 @@ void Settings::load() {
     data.lastMedia = s.value(QStringLiteral("media/last")).toString();
     data.recentMedia = s.value(QStringLiteral("media/recent")).toStringList();
 
-    data.actionIdle = s.value(QStringLiteral("actions/idle")).toString();
-    data.actionClick = s.value(QStringLiteral("actions/click")).toString();
-    data.actionDoubleClick = s.value(QStringLiteral("actions/doubleclick")).toString();
-    data.actionDrag = s.value(QStringLiteral("actions/drag")).toString();
+    const auto loadAction = [&s](const char* key, ActionConfig& cfg) {
+        const QString p = QStringLiteral("actions/%1/").arg(QString::fromLatin1(key));
+        cfg.media = s.value(p + QStringLiteral("media")).toString();
+        cfg.audio = s.value(p + QStringLiteral("audio")).toString();
+        cfg.holdMs = s.value(p + QStringLiteral("holdMs"), kDefaultHoldMs).toInt();
+        if (cfg.holdMs < kMinHoldMs) cfg.holdMs = kMinHoldMs;
+        if (cfg.holdMs > kMaxHoldMs) cfg.holdMs = kMaxHoldMs;
+    };
+    loadAction("idle", data.actionIdle);
+    loadAction("click", data.actionClick);
+    loadAction("doubleclick", data.actionDoubleClick);
+    loadAction("drag", data.actionDrag);
 
     const int x = s.value(QStringLiteral("window/x"), -1).toInt();
     const int y = s.value(QStringLiteral("window/y"), -1).toInt();
@@ -58,10 +66,16 @@ void Settings::save() {
     s.setValue(QStringLiteral("media/last"), data.lastMedia);
     s.setValue(QStringLiteral("media/recent"), data.recentMedia);
 
-    s.setValue(QStringLiteral("actions/idle"), data.actionIdle);
-    s.setValue(QStringLiteral("actions/click"), data.actionClick);
-    s.setValue(QStringLiteral("actions/doubleclick"), data.actionDoubleClick);
-    s.setValue(QStringLiteral("actions/drag"), data.actionDrag);
+    const auto saveAction = [&s](const char* key, const ActionConfig& cfg) {
+        const QString p = QStringLiteral("actions/%1/").arg(QString::fromLatin1(key));
+        s.setValue(p + QStringLiteral("media"), cfg.media);
+        s.setValue(p + QStringLiteral("audio"), cfg.audio);
+        s.setValue(p + QStringLiteral("holdMs"), cfg.holdMs);
+    };
+    saveAction("idle", data.actionIdle);
+    saveAction("click", data.actionClick);
+    saveAction("doubleclick", data.actionDoubleClick);
+    saveAction("drag", data.actionDrag);
 
     s.setValue(QStringLiteral("window/x"), data.pos.x());
     s.setValue(QStringLiteral("window/y"), data.pos.y());

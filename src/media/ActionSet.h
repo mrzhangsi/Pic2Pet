@@ -18,6 +18,7 @@ enum class PetAction {
 struct ActionClip {
     FrameSequence seq;
     bool loop = true;               // 只有待机/拖拽循环，其余播一次
+    int holdMs = 600;               // 素材是**静态图**时的停留时长（毫秒），播完就回待机
     bool isValid() const { return seq.isValid(); }
 };
 
@@ -39,8 +40,12 @@ public:
     /** 待机动作（窗口尺寸与兜底都按它来） */
     const ActionClip& idle() const { return idle_; }
 
-    /** 单独指定某个动作的素材（"动作设置"窗口的指定项）。loop 按动作语义决定。 */
-    bool setActionFromPath(PetAction a, const QString& path, QString* error = nullptr);
+    /** 单独指定某个动作的素材（"动作设置"窗口的指定项）。loop 按动作语义决定。
+     *  holdMs 只在素材是静态图时生效。 */
+    bool setActionFromPath(PetAction a, const QString& path, int holdMs, QString* error = nullptr);
+
+    /** 只改某个动作的停留时长（素材不变） */
+    void setHoldMs(PetAction a, int holdMs);
 
     /** 没有待机动作时，用第一个可用动作兜底。应用完指定项之后调用一次。 */
     void ensureIdle();

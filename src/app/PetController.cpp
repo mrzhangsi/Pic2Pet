@@ -1,6 +1,7 @@
 #include "PetController.h"
 
 #include "ActionSettingsDialog.h"
+#include "AudioPlayer.h"
 #include "AutoStart.h"
 #include "PetRenderer.h"
 #include "PetWindow.h"
@@ -41,7 +42,6 @@ constexpr int kAnimationIntervalMs = 16;   // 播放驱动：保持 16ms，不�
 constexpr int kWatchIntervalMs = 32;       // 穿透调度，30Hz 足够；再快只是白烧 CPU
 constexpr int kPerfIntervalMs = 1000;
 constexpr int kTopmostIntervalMs = 2000;
-constexpr int kOneShotStaticHoldMs = 600;  // 静态的一次性动作停留时长，然后回待机
 
 // 应用图标来自 app.qrc（src/app/app.ico），窗口图标与托盘图标共用同一份。
 // 若资源缺失（例如有人只拷了 exe），退回一个简单的蓝色圆点，保证托盘不空着。
@@ -174,7 +174,7 @@ bool PetController::composeActions(const QString& base, ActionSet* out, QString*
 
     struct Override {
         PetAction action;
-        const QString* path;
+        const ActionConfig* cfg;
     };
     const Override kOverrides[] = {
         { PetAction::Idle,        &settings_.data.actionIdle },
@@ -183,9 +183,13 @@ bool PetController::composeActions(const QString& base, ActionSet* out, QString*
         { PetAction::Drag,        &settings_.data.actionDrag },
     };
     for (const Override& o : kOverrides) {
-        if (o.path->isEmpty()) continue;
+        if (o.cfg->media.isEmpty()) {
+            // 没另指定素材（比如待机就沿用 lastMedia），但停留时长仍可能被改过
+            set.setHoldMs(o.action, o.cfg->holdMs);
+            continue;
+        }
         QString err;
-        if (!set.setActionFromPath(o.action, *o.path, &err)) {
+        if (!set.setActionFromPath(o.action, o.cfg->media, o.cfg->holdMs, &err)) {
             qWarning().noquote() << "[pet] 指定动作加载失败：" << err;
         }
     }
@@ -284,6 +288,7 @@ void PetController::playAction(PetAction a, bool force) {
 
     currentAction_ = a;
     loopCurrent_ = c.loop;
+    holdMsCurrent_ = c.holdMs;
     seq_ = c.seq;
 
     currentFrame_ = -1;
@@ -297,17 +302,35 @@ void PetController::playAction(PetAction a, bool force) {
         window_->renderer()->showFrame(0);
         animTimer_->stop();
         if (!loopCurrent_) {
-            // 静态的一次性动作没有"播完"这回事，停留一下再回待机
-            actionHoldTimer_->start(kOneShotStaticHoldMs);
+            // 静态的一次性动作没有"播完"这回事：按配置的停留时长停一下，再回待机
+            actionHoldTimer_->start(holdMsCurrent_);
         }
     } else {
         resumeAnimation();
     }
 
-    qInfo().noquote() << QStringLiteral("[pet] 动作 -> %1 %2")
+    // 音频与素材完全独立：只要这个动作配了音频就播（会打断上一次）
+    const QString audio = audioFor(a);
+    if (!audio.isEmpty()) audioPlayer().play(audio);
+
+    qInfo().noquote() << QStringLiteral("[pet] 动作 -> %1 %2%3")
                              .arg(ActionSet::actionName(a),
                                   loopCurrent_ ? QStringLiteral("(循环)")
-                                               : QStringLiteral("(一次)"));
+                                               : QStringLiteral("(一次)"))
+                             .arg(audio.isEmpty()
+                                      ? QString()
+                                      : QStringLiteral(" · 音频 %1")
+                                            .arg(QFileInfo(audio).fileName()));
+}
+
+QString PetController::audioFor(PetAction a) const {
+    switch (a) {
+    case PetAction::Idle:        return settings_.data.actionIdle.audio;
+    case PetAction::Click:       return settings_.data.actionClick.audio;
+    case PetAction::DoubleClick: return settings_.data.actionDoubleClick.audio;
+    case PetAction::Drag:        return settings_.data.actionDrag.audio;
+    }
+    return QString();
 }
 
 QSize PetController::spriteWindowSize() const {

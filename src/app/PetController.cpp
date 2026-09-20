@@ -768,18 +768,18 @@ void PetController::applyMotionParams() {
         break;
     case 1:                                     // 弱：只有回弹，不呼吸（静止时能真正停定时器）
         p.breathAmp = 0.0;
-        p.bounceAmp = 0.03;
-        p.leanDeg = 3.0;
+        p.bounceAmp = 0.05;
+        p.leanDeg = 4.0;
         break;
     case 3:                                     // 强
-        p.breathAmp = 0.02;
-        p.bounceAmp = 0.075;
-        p.leanDeg = 9.0;
+        p.breathAmp = 0.025;
+        p.bounceAmp = 0.12;
+        p.leanDeg = 10.0;
         break;
-    default:                                    // 中
-        p.breathAmp = 0.012;
-        p.bounceAmp = 0.05;
-        p.leanDeg = 6.0;
+    default:                                    // 中：单次按键压扁 8%、横移约 17px、歪 4°
+        p.breathAmp = 0.015;
+        p.bounceAmp = 0.08;
+        p.leanDeg = 7.0;
         break;
     }
     motion_.setParams(p);
@@ -796,13 +796,16 @@ void PetController::startMotion() {
 void PetController::onMotionTick() {
     if (!window_ || !window_->renderer()) return;
 
-    // 拖拽倾斜：用"这一帧窗口移动了多少像素"当速度，朝反方向倒（惯性感）
+    // 拖拽倾斜：用"这一帧窗口移动了多少像素"当速度，**朝运动反方向倒**（惯性感：
+    // 像拎着一个玩偶往右甩，下半身跟着手走、上半身在后面拖）。
+    // 符号约定：rotateDeg > 0 = 逆时针 = 顶端往**左**，所以往右拖(vel>0)要用正值。
+    // （之前写成 -v，结果变成了"往移动方向倒"，方向正好相反。）
     if (dragging_) {
         const int x = window_->x();
         const double v = double(x - lastDragX_);
         lastDragX_ = x;
         const double maxLean = motion_.params().leanDeg;
-        motion_.setLeanTarget(std::clamp(-v * 0.7, -maxLean, maxLean));
+        motion_.setLeanTarget(std::clamp(v * 0.7, -maxLean, maxLean));
     }
 
     const double dt = motionClock_.restart() / 1000.0;

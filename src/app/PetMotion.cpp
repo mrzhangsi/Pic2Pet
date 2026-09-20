@@ -9,15 +9,23 @@ namespace {
 constexpr double kPi = 3.14159265358979323846;
 constexpr double kSettlePos = 1e-4;
 constexpr double kSettleVel = 1e-3;
+/** 打字时横向分量换算成倾斜：打左边的键身子往左歪多少度（峰值） */
+constexpr double kTypingLeanDeg = 4.0;
 
 } // namespace
 
 void PetMotion::impulse(double amount, double lateral) {
     if (!params_.enabled) return;
 
-    // 单位是"幅度倍数"：spring 会把它们变成带过冲的收敛过程
-    bounceVel_ += amount * 3.0;
-    lateralVel_ += lateral * 2.0;
+    // 直接给**位移**、并把速度清零，让弹簧把它拉回去（快速按下 + 缓慢回弹，正是按键的手感）。
+    //
+    // 为什么不用"给初速度让弹簧积分上去"：那个峰值 ≈ 冲量/ω，对积分步长极其敏感——
+    // 显式欧拉在 dt=33ms、ω≈15 时数值阻尼很重，实测峰值只有解析解的 1/3，
+    // 而且系数改一次效果就变一次，很难预期。直接给位移则"设多少就是多少"，且连打能叠加。
+    bounce_ = std::min(bounce_ + amount, 1.5);
+    bounceVel_ = 0.0;
+    lateral_ = std::clamp(lateral_ + lateral * 0.6, -1.0, 1.0);
+    lateralVel_ = 0.0;
 }
 
 void PetMotion::setLeanTarget(double deg) {
@@ -69,14 +77,15 @@ PetTransform PetMotion::transform() const {
         breath = params_.breathAmp * qSin(2.0 * kPi * breathT_ / params_.breathPeriodSec);
     }
 
-    // 回弹：按键时纵向压扁一点（蹲一下），横向撑开一点
+    // 回弹：按键时纵向压扁（蹲一下）、横向撑开，并按"这个键在键盘上偏哪边"歪一点身子
     const double b = bounce_ * params_.bounceAmp;
 
     t.zoomX = 1.0 - 0.5 * breath + 0.6 * b;
     t.zoomY = 1.0 + breath - b;
-    t.dx = lateral_ * params_.bounceAmp * 1.5;
+    t.dx = lateral_ * params_.bounceAmp * 0.6;
     t.dy = 0.25 * breath - 0.35 * b;
-    t.rotateDeg = lean_;
+    // 光平移太"滑"了，加个绕脚底的倾斜才像"人往那边歪"
+    t.rotateDeg = lean_ + lateral_ * kTypingLeanDeg;
     return t;
 }
 

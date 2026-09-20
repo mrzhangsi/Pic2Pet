@@ -99,6 +99,18 @@ KeyBubble::KeyBubble(QWidget* parent) : QWidget(parent) {
     f.setBold(true);
     setFont(f);
 
+    // 尺寸**一次定死**，不跟着按键的宽窄变：
+    //   - 否则"A"→"回车"→"Shift"每一下都改尺寸，气泡会一直抽动，看着很躁；
+    //   - 而且改尺寸只会重绘新露出的那条边，中间的文字不重画（见 showKey 里的注释）。
+    // 宽度按最宽的几个标签算，保证谁都放得下。
+    const QFontMetrics fm(font());
+    const QString kSamples[] = { QStringLiteral("回车"), QStringLiteral("退格"),
+                                 QStringLiteral("Shift"), QStringLiteral("空格"),
+                                 QStringLiteral("F12"), QStringLiteral("W") };
+    int textWidth = 0;
+    for (const QString& s : kSamples) textWidth = std::max(textWidth, fm.horizontalAdvance(s));
+    setFixedSize(std::max(textWidth + kPadX * 2, kMinWidth), fm.height() + kPadY * 2 + kTailH);
+
     holdTimer_ = new QTimer(this);
     holdTimer_->setSingleShot(true);
     connect(holdTimer_, &QTimer::timeout, this, [this] {
@@ -121,10 +133,11 @@ void KeyBubble::showKey(quint32 vk) {
 
     if (label != text_) {
         text_ = label;
-        const QFontMetrics fm(font());
-        const int w = fm.horizontalAdvance(text_) + kPadX * 2;
-        const int h = fm.height() + kPadY * 2 + kTailH;
-        setFixedSize(std::max(w, kMinWidth), h);
+        // ★ 必须**强制重绘**。两个坑叠在一起就是"连续输入却一直显示第一个键"：
+        //   ① 尺寸没变时 setFixedSize 不会触发 paint；
+        //   ② 尺寸变了 Qt 也只补绘"新露出来的那条边"，中间那块旧文字留在后备存储里。
+        // 尺寸现在是固定的（见构造函数），所以这里直接整窗重绘。
+        update();
     }
 
     fade_->stop();

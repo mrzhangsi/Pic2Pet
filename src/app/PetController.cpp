@@ -39,7 +39,13 @@ namespace pic2pet {
 
 namespace {
 
-constexpr int kAnimationIntervalMs = 16;   // 播放驱动：保持 16ms，不按素材帧率降频（降频会抖）
+// 播放驱动改成"按下一帧的 deadline 唤醒"（学 BongoCat 的 deadline 等待）：
+// 100ms 一帧的素材就 100ms 醒一次，而不是 16ms 空转 6 次。
+// 下限 16ms = 60fps 上限：高于 60fps 的素材到点只呈现一次，多出来的帧跳过（时钟照走、不累积延迟）。
+constexpr int kAnimationIntervalMs = 16;
+constexpr int kAnimationMaxIntervalMs = 250;    // 上限：素材很慢时也要周期性醒来
+constexpr double kMaxFrameDeltaSec = 0.25;      // 卡顿/休眠后单帧最多推进这么多，避免画面跳一大段
+
 constexpr int kWatchIntervalMs = 32;       // 穿透调度，30Hz 足够；再快只是白烧 CPU
 constexpr int kPerfIntervalMs = 1000;
 constexpr int kTopmostIntervalMs = 2000;
@@ -507,12 +513,31 @@ bool PetController::eventFilter(QObject* watched, QEvent* event) {
     return QObject::eventFilter(watched, event);
 }
 
+int PetController::nextFrameDelayMs() const {
+    if (!seq_.isValid() || seq_.isStatic() || seq_.totalDuration <= 0.0) {
+        return kAnimationIntervalMs;
+    }
+
+    // 下一帧的起始时刻（最后一帧之后就是循环回开头）
+    const int idx = seq_.frameIndexAt(playhead_);
+    const double next = (idx + 1 < seq_.count()) ? seq_.starts.at(idx + 1) : seq_.totalDuration;
+
+    double remaining = next - playhead_;
+    if (remaining < 0.0) remaining = 0.0;
+
+    // 向下取整再多给 1ms：Qt/Win32 的定时器可能略早到，不留余量就会多醒一次才发现"帧还没变"
+    const int ms = int(remaining * 1000.0) + 1;
+    return std::clamp(ms, kAnimationIntervalMs, kAnimationMaxIntervalMs);
+}
+
 void PetController::onAnimationTick() {
     if (!window_ || !window_->renderer()) return;
+    ++ticksThisSecond_;   // 只诊断用：定时器实际醒了几次（与"换了几帧"区分开）
 
     if (!window_->renderer()->hasSprite()) {
         // 没有素材时退回 M0 的程序化动画
-        const double dt = animClock_.restart() / 1000.0;
+        double dt = animClock_.restart() / 1000.0;
+        if (dt > kMaxFrameDeltaSec) dt = kMaxFrameDeltaSec;
         phase_ += dt * 1.2;
         if (phase_ > 6.283185307179586) phase_ -= 6.283185307179586;
         window_->renderer()->setPhase(phase_);
@@ -523,7 +548,11 @@ void PetController::onAnimationTick() {
 
     if (seq_.isStatic()) return;   // 静态图不该走到这里
 
-    const double dt = animClock_.restart() / 1000.0;
+    double dt = animClock_.restart() / 1000.0;
+    // 卡顿/休眠后 dt 可能是好几秒，截断掉，否则一醒来画面直接跳一大段
+    if (dt > kMaxFrameDeltaSec) dt = kMaxFrameDeltaSec;
+    if (dt < 0.0) dt = 0.0;
+
     playhead_ += dt;
     if (playhead_ >= seq_.totalDuration) {
         if (!loopCurrent_) {
@@ -536,11 +565,16 @@ void PetController::onAnimationTick() {
     }
 
     const int index = seq_.frameIndexAt(playhead_);
-    if (index == currentFrame_) return;      // ② 帧没变：什么都不做
-    currentFrame_ = index;
+    if (index != currentFrame_) {
+        currentFrame_ = index;
+        window_->renderer()->showFrame(index);
+        ++framesThisSecond_;
+    }
 
-    window_->renderer()->showFrame(index);
-    ++framesThisSecond_;
+    // ④ 按"下一帧什么时候到"重新排定时（BongoCat 的 deadline 等待）。
+    //    帧没变时也重排一次，免得早到后还按旧间隔睡过头。
+    const int nextMs = nextFrameDelayMs();
+    if (nextMs != animTimer_->interval()) animTimer_->start(nextMs);
 }
 
 void PetController::onWatchTick() {
@@ -588,7 +622,9 @@ void PetController::onPerfTick() {
 
     qInfo().noquote()
         << QStringLiteral(
-               "[perf] timerFps=%1 renderFps=%2 cpu=%3%% mem=%4 toggles=%5 backend=%6 sprite=%7")
+               "[perf] wakeFps=%1 frameFps=%2 renderFps=%3 cpu=%4%% mem=%5 toggles=%6"
+               " backend=%7 sprite=%8")
+               .arg(ticksThisSecond_)
                .arg(framesThisSecond_)
                .arg(renderedDelta)
                .arg(sample.cpuPercent, 0, 'f', 1)
@@ -597,6 +633,7 @@ void PetController::onPerfTick() {
                .arg(clickThrough_ ? clickThrough_->name() : QStringLiteral("none"))
                .arg(sprite);
     framesThisSecond_ = 0;
+    ticksThisSecond_ = 0;
 }
 
 void PetController::onTopmostTick() {

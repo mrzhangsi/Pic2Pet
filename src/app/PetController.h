@@ -88,6 +88,8 @@ private:
     /** 切到某个动作：换序列、按 loop 决定播完是否回待机。
      *  force=true 时即使已经在放同一个循环动作也重新从头播。 */
     void playAction(PetAction a, bool force = false);
+    /** 距离"下一帧"还有多少毫秒（给播放定时器用） */
+    int nextFrameDelayMs() const;
     /** 由「基础素材文件（= 待机）+ 设置里逐项指定的动作素材」组合出动作集。
      *  基础素材挂了但指定项齐备时仍算成功。失败时把原因写进 *error。 */
     bool composeActions(const QString& base, ActionSet* out, QString* error) const;
@@ -131,6 +133,7 @@ private:
     ActionSettingsDialog* actionDialog_ = nullptr;
     KeyboardMonitor* keyboard_ = nullptr;   // 输入模式用；不启用时根本不创建
     qint64 lastInputTickMs_ = 0;            // 打字节流的上一次时刻
+    int ticksThisSecond_ = 0;               // 播放定时器实际唤醒次数（诊断用）
 
     QElapsedTimer animClock_;
     mutable PerfProbe probe_;

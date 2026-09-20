@@ -11,6 +11,24 @@
 namespace pic2pet {
 
 /**
+ * 参数化变换 —— "动态效果"各通道叠加出来的结果（呼吸 / 打字回弹 / 拖拽倾斜）。
+ *
+ * 这是**不用 Live2D 也能做出跟手效果**的关键：Live2D 的本质是"可叠加的参数通道"，
+ * 而不是模型格式。这里我们没有网格变形，只有刚体变换，但通道之间同样互相独立、可叠加。
+ */
+struct PetTransform {
+    double dx = 0.0;          // 归一化位移（NDC：1.0 = 半个视口）
+    double dy = 0.0;
+    double zoomX = 1.0;       // 通道缩放（squash）
+    double zoomY = 1.0;
+    double rotateDeg = 0.0;   // 绕精灵**底边中点**旋转（像"身子歪"而不是"整体转"）
+
+    bool isIdentity() const {
+        return dx == 0.0 && dy == 0.0 && zoomX == 1.0 && zoomY == 1.0 && rotateDeg == 0.0;
+    }
+};
+
+/**
  * 渲染后端： Qt::WA_TranslucentBackground 的窗口里用原生 OpenGL 绘制。
  *
  * 选型理由（技术方案 3.2）：用原生 OpenGL 而不是 Qt Quick，是因为
@@ -56,6 +74,11 @@ public:
     float spriteScaleX() const { return scaleX_; }
     float spriteScaleY() const { return scaleY_; }
 
+    /** 设置动态通道的变换。与 spriteScale 是**两层**：前者是素材铺进窗口的等比缩放，
+     *  后者是每帧变化的动作变换，两者在着色器里相乘。 */
+    void setTransform(const PetTransform& t);
+    const PetTransform& transform() const { return transform_; }
+
     int frameCount() const { return frames_; }
     QString glInfo() const { return glInfo_; }
     bool glReady() const { return ready_; }
@@ -88,6 +111,7 @@ private:
     bool textureAllocated_ = false;
     float scaleX_ = 1.0f;        // 精灵在视口内的相对缩放，(0,1]，双轴
     float scaleY_ = 1.0f;
+    PetTransform transform_;
 };
 
 } // namespace pic2pet

@@ -54,14 +54,27 @@ void main() {
 // 注意没有做 gamma / 颜色空间转换——素材本身就是 sRGB，这里原样输出即可。
 // uScale：精灵在视口内的相对缩放，(1,1) = 铺满。双轴是为了让"宽高比不同的动作"
 // 也能等比铺进同一个固定尺寸的窗口而不变形。
+// uZoom / uOffset / uRot：动态通道的变换（呼吸 / 打字回弹 / 拖拽倾斜），每帧都在变。
+// 支点取精灵**底边中点**——这样 squash 看着像"蹲下去"、倾斜看着像"身子歪"，
+// 而不是绕画面中心整体转（那样会像漂浮）。
 const char* kSpriteVertexShader = R"(
 attribute vec2 aPos;
 attribute vec2 aTex;
 uniform vec2 uScale;
+uniform vec2 uZoom;
+uniform vec2 uOffset;
+uniform float uRot;
 varying vec2 vUv;
 void main() {
     vUv = aTex;
-    gl_Position = vec4(aPos * uScale, 0.0, 1.0);
+    vec2 p = aPos * uScale;
+    vec2 pivot = vec2(0.0, -uScale.y);
+    vec2 q = p - pivot;
+    q *= uZoom;
+    float c = cos(uRot);
+    float s = sin(uRot);
+    q = vec2(q.x * c - q.y * s, q.x * s + q.y * c);
+    gl_Position = vec4(q + pivot + uOffset, 0.0, 1.0);
 }
 )";
 
@@ -126,6 +139,15 @@ void PetRenderer::clearSprite() {
     update();
 }
 
+void PetRenderer::setTransform(const PetTransform& t) {
+    if (t.dx == transform_.dx && t.dy == transform_.dy && t.zoomX == transform_.zoomX
+        && t.zoomY == transform_.zoomY && t.rotateDeg == transform_.rotateDeg) {
+        return;   // 变换没变：一次绘制都不多发
+    }
+    transform_ = t;
+    update();
+}
+
 void PetRenderer::setSpriteScale(float sx, float sy) {
     if (!(sx > 0.0f)) sx = 0.0001f;   // 同时挡住 <=0 与 NaN
     if (!(sy > 0.0f)) sy = 0.0001f;
@@ -161,7 +183,7 @@ void PetRenderer::ensureSpriteTexture() {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
-    // 只分配一次纹���空间，之后每帧用 glTexSubImage2D 增量更新，
+    // 只分配一次纹理空间，之后每帧用 glTexSubImage2D 增量更新，
     // 避免为每一帧各建一张纹理导致显存翻倍（技术方案 12.2）
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, sprite_.width, sprite_.height, 0,
                  GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
@@ -298,6 +320,10 @@ void PetRenderer::paintGL() {
         glBindTexture(GL_TEXTURE_2D, texture_);
         spriteProgram_.setUniformValue("uTex", 0);
         spriteProgram_.setUniformValue("uScale", scaleX_, scaleY_);
+        spriteProgram_.setUniformValue("uZoom", float(transform_.zoomX),
+                                       float(transform_.zoomY));
+        spriteProgram_.setUniformValue("uOffset", float(transform_.dx), float(transform_.dy));
+        spriteProgram_.setUniformValue("uRot", float(transform_.rotateDeg * 3.14159265358979 / 180.0));
 
         glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 

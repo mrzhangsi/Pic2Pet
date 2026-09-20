@@ -47,6 +47,9 @@ constexpr int kAnimationMaxIntervalMs = 250;    // 上限：素材很慢时也�
 constexpr double kMaxFrameDeltaSec = 0.25;      // 卡顿/休眠后单帧最多推进这么多，避免画面跳一大段
 
 constexpr int kWatchIntervalMs = 32;       // 穿透调度，30Hz 足够；再快只是白烧 CPU
+// 动态通道（呼吸/回弹/倾斜）的推进频率。30Hz 对弹簧已经够顺滑，
+// 比 60Hz 少一半的 DWM 合成——透明分层窗口的合成才是大头，不是我们的绘制。
+constexpr int kMotionIntervalMs = 33;
 constexpr int kPerfIntervalMs = 1000;
 constexpr int kTopmostIntervalMs = 2000;
 /** 输入模式下两次"敲键"之间的最小间隔：打字很快时不要每一下都放动画 */
@@ -115,6 +118,9 @@ PetController::PetController(ClickThroughBackend backend, int size, bool useTray
     actionHoldTimer_->setSingleShot(true);
     connect(actionHoldTimer_, &QTimer::timeout, this, [this] { playAction(PetAction::Idle, true); });
 
+    motionTimer_ = new QTimer(this);
+    connect(motionTimer_, &QTimer::timeout, this, &PetController::onMotionTick);
+
     window_->setWindowOpacity(settings_.data.opacity);
     window_->resize(size, size);
 
@@ -149,6 +155,10 @@ void PetController::start(const QString& cliMedia) {
 
     // 输入模式：上次开着的话这里恢复。默认 false，所以正常情况下不会装钩子
     if (settings_.data.inputMode) setInputMode(true);
+
+    // 动态通道：按上次的强度起步（强度 0 时什么都不会起）
+    applyMotionParams();
+    startMotion();
 }
 
 void PetController::switchBackend(ClickThroughBackend backend) {
@@ -489,12 +499,14 @@ bool PetController::eventFilter(QObject* watched, QEvent* event) {
         suspended_ = true;
         animTimer_->stop();
         watchTimer_->stop();
+        motionTimer_->stop();
         return false;
     }
     if (t == QEvent::Show) {
         suspended_ = false;
         watchTimer_->start(kWatchIntervalMs);
         resumeAnimation();
+        startMotion();
         return false;
     }
     if (t == QEvent::WindowStateChange) {
@@ -503,10 +515,12 @@ bool PetController::eventFilter(QObject* watched, QEvent* event) {
             suspended_ = true;
             animTimer_->stop();
             watchTimer_->stop();
+            motionTimer_->stop();
         } else if (suspended_ && window_ && window_->isVisible()) {
             suspended_ = false;
             watchTimer_->start(kWatchIntervalMs);
             resumeAnimation();
+            startMotion();
         }
         return false;
     }
@@ -652,7 +666,9 @@ void PetController::onTopmostTick() {
 
 void PetController::onDragStarted() {
     dragging_ = true;
+    if (window_) lastDragX_ = window_->x();
     playAction(PetAction::Drag);        // 没提供拖拽动作时，内部会自动忽略
+    startMotion();                      // 拖拽倾斜也要动态通道跑起来
 }
 
 void PetController::onDragEnded() {
@@ -661,6 +677,8 @@ void PetController::onDragEnded() {
         settings_.data.pos = window_->pos();
         settings_.save();
     }
+    motion_.setLeanTarget(0.0);         // 松手回正
+    startMotion();
     playAction(PetAction::Idle, true);  // 松手回待机
 }
 
@@ -699,8 +717,6 @@ void PetController::setInputMode(bool on) {
 }
 
 void PetController::onKeyEvent(quint32 vk, bool down) {
-    // vk 先留着不用：以后要做"显示按键字符 / 区分修饰键"时从这里接
-    Q_UNUSED(vk);
     if (!down) return;                            // 只在按下时触发
 
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
@@ -708,6 +724,112 @@ void PetController::onKeyEvent(quint32 vk, bool down) {
     lastInputTickMs_ = now;
 
     playAction(PetAction::Typing);
+
+    // 动态通道：给弹簧一个冲量，并按这个键在键盘上偏左/偏右给个横向分量。
+    // 这样"打左边的键它往左歪、打右边往右歪"，观感上就接近 BongoCat 的手跟着键走。
+    motion_.impulse(1.0, keyLateral(vk));
+    startMotion();
+}
+
+double PetController::keyLateral(quint32 vk) {
+    // 只用虚拟键码粗估左右：字母按 QWERTY 三行的列号，数字按主键盘列。
+    // 不追求精确——它只是给"跟手"一点方向性，不是真的把手画到键上（那是阶段 2 的事）。
+    static const QString kRows[3] = { QStringLiteral("QWERTYUIOP"),
+                                      QStringLiteral("ASDFGHJKL"),
+                                      QStringLiteral("ZXCVBNM") };
+
+    if (vk >= 'A' && vk <= 'Z') {
+        const QChar c = QChar(char(vk));
+        for (const QString& row : kRows) {
+            const int col = row.indexOf(c);
+            if (col >= 0 && row.size() > 1) {
+                return (double(col) / double(row.size() - 1)) * 2.0 - 1.0;
+            }
+        }
+    }
+    if (vk >= '0' && vk <= '9') {
+        const int d = int(vk - '0');                       // 1..9,0
+        const double t = (d == 0) ? 0.95 : double(d - 1) / 8.0;
+        return t * 2.0 - 1.0;
+    }
+    return 0.0;   // 空格 / 回车 / 修饰键：正中间
+}
+
+void PetController::applyMotionParams() {
+    PetMotion::Params p;
+    const int level = settings_.data.motionLevel;
+    p.enabled = (level > 0);
+
+    switch (level) {
+    case 0:                                     // 关
+        p.breathAmp = 0.0;
+        p.bounceAmp = 0.0;
+        p.leanDeg = 0.0;
+        break;
+    case 1:                                     // 弱：只有回弹，不呼吸（静止时能真正停定时器）
+        p.breathAmp = 0.0;
+        p.bounceAmp = 0.03;
+        p.leanDeg = 3.0;
+        break;
+    case 3:                                     // 强
+        p.breathAmp = 0.02;
+        p.bounceAmp = 0.075;
+        p.leanDeg = 9.0;
+        break;
+    default:                                    // 中
+        p.breathAmp = 0.012;
+        p.bounceAmp = 0.05;
+        p.leanDeg = 6.0;
+        break;
+    }
+    motion_.setParams(p);
+}
+
+void PetController::startMotion() {
+    if (settings_.data.motionLevel <= 0) return;
+    if (!window_ || !window_->renderer()) return;
+    if (motionTimer_->isActive()) return;
+    motionClock_.start();
+    motionTimer_->start(kMotionIntervalMs);
+}
+
+void PetController::onMotionTick() {
+    if (!window_ || !window_->renderer()) return;
+
+    // 拖拽倾斜：用"这一帧窗口移动了多少像素"当速度，朝反方向倒（惯性感）
+    if (dragging_) {
+        const int x = window_->x();
+        const double v = double(x - lastDragX_);
+        lastDragX_ = x;
+        const double maxLean = motion_.params().leanDeg;
+        motion_.setLeanTarget(std::clamp(-v * 0.7, -maxLean, maxLean));
+    }
+
+    const double dt = motionClock_.restart() / 1000.0;
+    if (!motion_.step(dt)) {
+        // 已经静止：归位、停表，别再白烧 CPU
+        motionTimer_->stop();
+        window_->renderer()->setTransform(PetTransform());
+        return;
+    }
+    window_->renderer()->setTransform(motion_.transform());
+}
+
+void PetController::setMotionLevel(int level) {
+    if (level < 0) level = 0;
+    if (level > 3) level = 3;
+    settings_.data.motionLevel = level;
+    settings_.save();
+
+    applyMotionParams();
+    if (level <= 0) {
+        motionTimer_->stop();
+        if (window_ && window_->renderer()) window_->renderer()->setTransform(PetTransform());
+        qInfo().noquote() << "[pet] 动态效果已关闭";
+    } else {
+        startMotion();
+        qInfo().noquote() << QStringLiteral("[pet] 动态效果 -> %1").arg(level);
+    }
 }
 
 void PetController::onFileDropped(const QString& path) {
@@ -805,6 +927,22 @@ void PetController::rebuildMenu(QMenu* menu) {
     menu->addSeparator();
 
     menu->addAction(QStringLiteral("动作设置…"), this, [this] { openActionSettings(); });
+
+    // 动态效果：呼吸 / 打字回弹 / 拖拽倾斜。
+    // 注意"中/强"会开着呼吸 = 一直在动，静态素材的 CPU 会从 ~0 变成持续重绘。
+    auto* motionMenu = menu->addMenu(QStringLiteral("动态效果"));
+    motionMenu->setToolTip(QStringLiteral("呼吸 / 打字回弹 / 拖拽倾斜；"
+                                          "「中」「强」含呼吸，会持续重绘"));
+    auto* motionGroup = new QActionGroup(motionMenu);
+    motionGroup->setExclusive(true);
+    static const char* const kLevelNames[4] = { "关", "弱", "中", "强" };
+    for (int level = 0; level <= 3; ++level) {
+        auto* act = motionMenu->addAction(QString::fromUtf8(kLevelNames[level]));
+        act->setCheckable(true);
+        act->setChecked(settings_.data.motionLevel == level);
+        connect(act, &QAction::triggered, this, [this, level] { setMotionLevel(level); });
+        motionGroup->addAction(act);
+    }
 
     // 输入模式：全局键盘监听。默认关闭，勾选是唯一开关
     auto* inputAction = menu->addAction(QStringLiteral("输入模式（跟随键盘）"));

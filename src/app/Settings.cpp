@@ -54,6 +54,9 @@ void Settings::load() {
     loadAction("typing", data.actionTyping);
 
     data.inputMode = s.value(QStringLiteral("input/mode"), false).toBool();
+    data.motionLevel = s.value(QStringLiteral("motion/level"), 2).toInt();
+    if (data.motionLevel < 0) data.motionLevel = 0;
+    if (data.motionLevel > 3) data.motionLevel = 3;
 
     const int x = s.value(QStringLiteral("window/x"), -1).toInt();
     const int y = s.value(QStringLiteral("window/y"), -1).toInt();
@@ -82,6 +85,7 @@ void Settings::save() {
     saveAction("typing", data.actionTyping);
 
     s.setValue(QStringLiteral("input/mode"), data.inputMode);
+    s.setValue(QStringLiteral("motion/level"), data.motionLevel);
 
     s.setValue(QStringLiteral("window/x"), data.pos.x());
     s.setValue(QStringLiteral("window/y"), data.pos.y());

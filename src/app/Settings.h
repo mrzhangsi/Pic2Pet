@@ -49,6 +49,12 @@ struct PetSettingsData {
      * 且会加重杀软误报（见 src/input/README.md 与 README 的「被报毒」一节）。
      */
     bool inputMode = false;
+
+    /**
+     * 动态效果强度（呼吸 / 打字回弹 / 拖拽倾斜）：0=关 1=弱 2=中 3=强。
+     * 注意：≥2 会开着"呼吸"，也就是**一直在动**，静态素材的 CPU 会从 ~0 变成持续重绘。
+     */
+    int motionLevel = 2;
 };
 
 /**

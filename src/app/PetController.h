@@ -10,6 +10,7 @@
 #include "FrameSequence.h"
 #include "HitRegions.h"
 #include "PerfProbe.h"
+#include "PetMotion.h"
 #include "Settings.h"
 
 class QMenu;
@@ -60,6 +61,10 @@ public:
     void setInputMode(bool on);
     bool inputMode() const { return settings_.data.inputMode; }
 
+    /** 动态效果强度：0=关 1=弱 2=中 3=强（呼吸 / 打字回弹 / 拖拽倾斜） */
+    void setMotionLevel(int level);
+    int motionLevel() const { return settings_.data.motionLevel; }
+
     /** 加载单个素材文件（该文件即待机动作）。失败返回 false 并把原因写进 lastError() */
     bool loadMedia(const QString& path);
     QString lastError() const { return lastError_; }
@@ -78,6 +83,8 @@ private slots:
     void onDoubleClicked();
     /** 输入模式：收到全局按键（vk 是 Windows 虚拟键码，down=按下） */
     void onKeyEvent(quint32 vk, bool down);
+    /** 动态通道的每帧推进 */
+    void onMotionTick();
     void onContextMenu(const QPoint& globalPos);
     void onFileDropped(const QString& path);
     void onWheelZoomed(int steps);
@@ -97,6 +104,12 @@ private:
     void reloadActions();
     /** 该动作配的音频文件（空 = 不发声）。音频与素材完全独立。 */
     QString audioFor(PetAction a) const;
+    /** 按设置强度填动态通道的参数 */
+    void applyMotionParams();
+    /** 起动态定时器（静止后会自动停） */
+    void startMotion();
+    /** 只用 vk 粗估这个键在键盘上偏左还是偏右，范围 [-1, 1] */
+    static double keyLateral(quint32 vk);
     void updateWindowSize();
     /** 当前是否有可播放的动画（无素材时的程序化圆盘也算） */
     bool animatable() const;
@@ -134,6 +147,12 @@ private:
     KeyboardMonitor* keyboard_ = nullptr;   // 输入模式用；不启用时根本不创建
     qint64 lastInputTickMs_ = 0;            // 打字节流的上一次时刻
     int ticksThisSecond_ = 0;               // 播放定时器实际唤醒次数（诊断用）
+
+    // ---- 动态通道（呼吸 / 打字回弹 / 拖拽倾斜）----
+    PetMotion motion_;
+    QTimer* motionTimer_ = nullptr;
+    QElapsedTimer motionClock_;
+    int lastDragX_ = 0;                     // 拖拽倾斜用：上一帧的窗口 x
 
     QElapsedTimer animClock_;
     mutable PerfProbe probe_;

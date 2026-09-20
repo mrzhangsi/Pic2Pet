@@ -15,6 +15,8 @@ add_executable(Pic2Pet
     Settings.cpp
     ActionSettingsDialog.h
     ActionSettingsDialog.cpp
+    PetMotion.h
+    PetMotion.cpp
     AutoStart.h
     AutoStart.cpp
     app.rc          # Windows resources: RT_MANIFEST (app.manifest) + exe icon (app.ico)

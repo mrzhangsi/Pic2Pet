@@ -152,6 +152,7 @@ private:
     PetMotion motion_;
     QTimer* motionTimer_ = nullptr;
     QElapsedTimer motionClock_;
+    int lastDragX_ = 0;                     // 拖拽倾斜用：上一帧的窗口 x
     KeyBubble* keyBubble_ = nullptr;        // 按键气泡；输入模式开启时才创建
 
     QElapsedTimer animClock_;
@@ -160,6 +161,7 @@ private:
     FrameSequence seq_;             // 当前正在播放的动作序列（= actions_ 里当前动作的 seq）
     ActionSet actions_;             // 待机 / 单击 / 双击 / 拖拽
     PetAction currentAction_ = PetAction::Idle;
+    double idlePlayhead_ = 0.0;     // 离开待机时的播放头，回待机时接着放（避免"跳回第一帧"）
     bool loopCurrent_ = true;       // 当前动作是否循环
     int holdMsCurrent_ = kDefaultHoldMs;   // 当前动作（静态素材）的停留时长
     double playhead_ = 0.0;        // 播放头，始终落在 [0, totalDuration)

@@ -18,8 +18,10 @@ constexpr int kPadX = 20;        // 文字左右留白
 constexpr int kPadY = 11;        // 文字上下留白
 constexpr int kTailH = 8;        // 小尾巴高度
 constexpr qreal kRadius = 14.0;  // 圆角半径
-constexpr int kHoldMs = 950;     // 停留多久开始淡出
-constexpr int kFadeMs = 260;     // 淡出时长
+// 停留要短、淡出要快：气泡是"跟着手走"的东西，停太久反而像卡住了。
+// 每个键都会重启这个计时，所以连打时它一直亮着，一停手很快就消失。
+constexpr int kHoldMs = 380;
+constexpr int kFadeMs = 140;
 constexpr int kMinWidth = 58;
 
 // 只用到的那几个虚拟键码。这里自己定义而不是 include <windows.h>，
@@ -132,14 +134,16 @@ void KeyBubble::showKey(quint32 vk) {
     holdTimer_->start(kHoldMs);
 }
 
-void KeyBubble::placeAbove(const QRect& petRect) {
-    QScreen* screen = QApplication::screenAt(petRect.center());
+void KeyBubble::placeNearSprite(const QRect& sprite) {
+    QScreen* screen = QApplication::screenAt(sprite.center());
     if (!screen) screen = QApplication::primaryScreen();
     const QRect avail = screen ? screen->availableGeometry() : QRect(0, 0, 1920, 1080);
 
-    int y = petRect.top() - height() - 6;
-    if (y < avail.top()) y = petRect.bottom() + 6;   // 上方放不下就翻到下面
-    int x = petRect.center().x() - width() / 2;
+    // 靠精灵**左上**：气泡中心放在精灵左侧 1/6 处（小尾巴正好指在左上那一带），
+    // 垂直贴在精灵上方。这样宠物放大缩小时，框会跟着精灵走。
+    int x = sprite.left() + sprite.width() / 6 - width() / 2;
+    int y = sprite.top() - height() - 6;
+    if (y < avail.top()) y = sprite.bottom() + 6;    // 上方放不下就翻到下面
 
     x = std::clamp(x, avail.left() + 4, avail.right() - width() - 4);
     y = std::clamp(y, avail.top() + 4, avail.bottom() - height() - 4);

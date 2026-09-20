@@ -11,6 +11,8 @@ namespace {
 constexpr double kPi = 3.14159265358979323846;
 constexpr double kSettlePos = 1e-4;
 constexpr double kSettleVel = 1e-3;
+/** 倾斜朝目标的逼近速率（1/s）：越大越跟手，越小越"晃" */
+constexpr double kLeanRate = 8.0;
 
 } // namespace
 
@@ -24,6 +26,10 @@ void PetMotion::impulse(double amount) {
     // 系数改一次效果就变一次，没法预期。直接给位移则"设多少就是多少"，且连打能叠加。
     bounce_ = std::min(bounce_ + amount, 1.5);
     bounceVel_ = 0.0;
+}
+
+void PetMotion::setLeanTarget(double deg) {
+    leanTarget_ = params_.enabled ? deg : 0.0;
 }
 
 bool PetMotion::step(double dt) {
@@ -41,9 +47,17 @@ bool PetMotion::step(double dt) {
     bounceVel_ += (-k * bounce_ - c * bounceVel_) * dt;
     bounce_ += bounceVel_ * dt;
 
+    // 倾斜：朝目标平滑逼近（不用弹簧，免得拖拽时来回晃）
+    double t = kLeanRate * dt;
+    if (t > 1.0) t = 1.0;
+    lean_ += (leanTarget_ - lean_) * t;
+
     // 已经静止？（呼吸开着就不算静止——它是持续的）
     if (params_.breathAmp > 0.0) return true;
-    if (qAbs(bounce_) < kSettlePos && qAbs(bounceVel_) < kSettleVel) return false;
+    if (qAbs(bounce_) < kSettlePos && qAbs(bounceVel_) < kSettleVel
+        && qAbs(lean_ - leanTarget_) < 1e-3) {
+        return false;
+    }
     return true;
 }
 
@@ -63,6 +77,7 @@ PetTransform PetMotion::transform() const {
     t.zoomX = 1.0 - 0.5 * breath + 0.6 * b;
     t.zoomY = 1.0 + breath - b;
     t.dy = 0.25 * breath - 0.35 * b;
+    t.rotateDeg = lean_;      // 只有拖拽会驱动它
     return t;
 }
 

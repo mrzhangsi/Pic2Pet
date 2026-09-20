@@ -22,11 +22,16 @@ class KeyBubble : public QWidget {
 public:
     explicit KeyBubble(QWidget* parent = nullptr);
 
-    /** 显示一个按键；停留一会儿后自动淡出。重复调用会刷新计时并更新文字。 */
+    /** 显示一个按键；停留一会儿后自动淡出。重复调用会刷新计时并**立刻**更新文字。 */
     void showKey(quint32 vk);
 
-    /** 把气泡摆到 petRect 正上方居中；顶到屏幕外就翻到下方，并夹在屏幕内。 */
-    void placeAbove(const QRect& petRect);
+    /**
+     * 把气泡摆到**精灵**（不是窗口）的左上侧。
+     * 窗口是按"最大缩放"预留的，精灵只占其中一块、还会随缩放变化，
+     * 所以锚点必须用精灵的实际矩形（`PetWindow::interactiveRect()` + 窗口原点换算到屏幕坐标）。
+     * 上方放不下就翻到下方，并始终夹在屏幕内。
+     */
+    void placeNearSprite(const QRect& spriteGlobal);
 
     /** vk → 可读按键名（字母/数字直接给字符；其余给"空格""回车""↑"这类）。 */
     static QString keyLabel(quint32 vk);

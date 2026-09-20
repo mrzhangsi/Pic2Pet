@@ -314,16 +314,25 @@ void PetController::playAction(PetAction a, bool force) {
 
     if (actionHoldTimer_) actionHoldTimer_->stop();
 
+    // 离开待机时记下播放头：回到待机要**接着放**，而不是从第一帧重来。
+    // （否则单击/双击/拖拽一结束，待机动画就会"啪"地跳回开头，很跳戏。）
+    if (currentAction_ == PetAction::Idle && seq_.isValid()) idlePlayhead_ = playhead_;
+
     currentAction_ = a;
     loopCurrent_ = c.loop;
     holdMsCurrent_ = c.holdMs;
     seq_ = c.seq;
 
     currentFrame_ = -1;
-    playhead_ = 0.0;
+    if (a == PetAction::Idle && idlePlayhead_ > 0.0 && seq_.totalDuration > 0.0) {
+        playhead_ = std::fmod(idlePlayhead_, seq_.totalDuration);
+    } else {
+        playhead_ = 0.0;
+    }
 
     window_->renderer()->setSprite(seq_);
-    updateWindowSize();   // 窗口尺寸只由"待机动作"的宽高比决定，所以换动作不会 resize
+    updateWindowSize();      // 窗口尺寸只由"待机动作"的宽高比决定，所以换动作不会 resize
+    applyZoomToRenderer();   // 但精灵矩形会变（宽高比/缩放都可能不同）→ 刷新命中区与气泡锚点
 
     if (seq_.isStatic()) {
         // ① 静态素材：上传一次就够了，之后不再有任何绘制
@@ -671,7 +680,9 @@ void PetController::onTopmostTick() {
 
 void PetController::onDragStarted() {
     dragging_ = true;
+    if (window_) lastDragX_ = window_->x();
     playAction(PetAction::Drag);        // 没提供拖拽动作时，内部会自动忽略
+    startMotion();                      // 拖拽倾斜要靠动态通道跑起来
 }
 
 void PetController::onDragEnded() {
@@ -680,7 +691,12 @@ void PetController::onDragEnded() {
         settings_.data.pos = window_->pos();
         settings_.save();
     }
-    playAction(PetAction::Idle, true);  // 松手回待机
+    motion_.setLeanTarget(0.0);         // 松手回正
+    startMotion();
+    // **不要 force**：没配拖拽动作时上面那个 playAction(Drag) 直接返回了、当前仍是待机，
+    // 这时强制重进待机会把播放头清零 —— 表现就是"一松手动画跳回第一帧"。
+    // 不带 force 时，"已经在放待机"会被 playAction 里的短路挡住，动画就接着放。
+    playAction(PetAction::Idle);
 }
 
 void PetController::onClicked() {
@@ -723,10 +739,14 @@ void PetController::setInputMode(bool on) {
 void PetController::onKeyEvent(quint32 vk, bool down) {
     if (!down) return;                            // 只在按下时触发
 
-    // 按键气泡：**每个键都要显示**，所以放在节流之前（节流只该管动作和回弹）
+    // 按键气泡：**每个键都要显示**，所以放在节流之前（节流只该管动作和回弹）。
+    // 锚点用**精灵的实际矩形**：窗口是按最大缩放预留的，精灵只占其中一块、还会随缩放变。
     if (keyBubble_ && settings_.data.keyBubble && window_) {
+        const QRect spriteLocal = window_->interactiveRect();
+        const QRect spriteGlobal(spriteLocal.topLeft() + window_->mapToGlobal(QPoint(0, 0)),
+                                 spriteLocal.size());
         keyBubble_->showKey(vk);
-        keyBubble_->placeAbove(window_->frameGeometry());
+        keyBubble_->placeNearSprite(spriteGlobal);
     }
 
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
@@ -750,18 +770,22 @@ void PetController::applyMotionParams() {
     case 0:                                     // 关
         p.breathAmp = 0.0;
         p.bounceAmp = 0.0;
+        p.leanDeg = 0.0;
         break;
     case 1:                                     // 弱：只有回弹，不呼吸（静止时能真正停定时器）
         p.breathAmp = 0.0;
         p.bounceAmp = 0.05;
+        p.leanDeg = 6.0;
         break;
     case 3:                                     // 强
         p.breathAmp = 0.025;
         p.bounceAmp = 0.12;
+        p.leanDeg = 14.0;
         break;
-    default:                                    // 中：单次按键压扁 8%
+    default:                                    // 中：单次按键压扁 8%，拖拽最多歪 10°
         p.breathAmp = 0.015;
         p.bounceAmp = 0.08;
+        p.leanDeg = 10.0;
         break;
     }
     motion_.setParams(p);
@@ -777,6 +801,17 @@ void PetController::startMotion() {
 
 void PetController::onMotionTick() {
     if (!window_ || !window_->renderer()) return;
+
+    // 拖拽倾斜：用"这一帧窗口移动了多少像素"当速度，**朝运动反方向倒**（惯性：像拎着玩偶往右甩，
+    // 下半身跟着手走、上半身在后面拖）。
+    // 符号约定：rotateDeg > 0 = 逆时针 = 顶端往**左**，所以往右拖(vel>0)要用正值。
+    if (dragging_) {
+        const int x = window_->x();
+        const double v = double(x - lastDragX_);
+        lastDragX_ = x;
+        const double maxLean = motion_.params().leanDeg;
+        motion_.setLeanTarget(std::clamp(v * 0.7, -maxLean, maxLean));
+    }
 
     const double dt = motionClock_.restart() / 1000.0;
     if (!motion_.step(dt)) {

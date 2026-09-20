@@ -3,6 +3,7 @@
 #include "ActionSettingsDialog.h"
 #include "AudioPlayer.h"
 #include "AutoStart.h"
+#include "KeyBubble.h"
 #include "KeyboardMonitor.h"
 #include "PetRenderer.h"
 #include "PetWindow.h"
@@ -125,6 +126,10 @@ PetController::PetController(ClickThroughBackend backend, int size, bool useTray
     window_->resize(size, size);
 
     if (useTray) buildTray();
+}
+
+PetController::~PetController() {
+    delete keyBubble_;      // 顶层窗口没有 QObject 父对象，得自己收
 }
 
 void PetController::start(const QString& cliMedia) {
@@ -666,9 +671,7 @@ void PetController::onTopmostTick() {
 
 void PetController::onDragStarted() {
     dragging_ = true;
-    if (window_) lastDragX_ = window_->x();
     playAction(PetAction::Drag);        // 没提供拖拽动作时，内部会自动忽略
-    startMotion();                      // 拖拽倾斜也要动态通道跑起来
 }
 
 void PetController::onDragEnded() {
@@ -677,8 +680,6 @@ void PetController::onDragEnded() {
         settings_.data.pos = window_->pos();
         settings_.save();
     }
-    motion_.setLeanTarget(0.0);         // 松手回正
-    startMotion();
     playAction(PetAction::Idle, true);  // 松手回待机
 }
 
@@ -698,6 +699,8 @@ void PetController::setInputMode(bool on) {
             keyboard_ = new KeyboardMonitor(this);
             connect(keyboard_, &KeyboardMonitor::keyEvent, this, &PetController::onKeyEvent);
         }
+        // 顶层小窗口（不能挂在桌宠窗口上：那是 OpenGL 窗口，子控件容易和它打架）
+        if (!keyBubble_) keyBubble_ = new KeyBubble(nullptr);
 
         QString err;
         if (!keyboard_->start(&err)) {
@@ -710,6 +713,7 @@ void PetController::setInputMode(bool on) {
         qInfo().noquote() << "[pet] 输入模式已开启（" << keyboard_->name() << "）";
     } else {
         if (keyboard_) keyboard_->stop();
+        if (keyBubble_) keyBubble_->hide();      // 关了输入模式，气泡也不该再冒出来
         qInfo().noquote() << "[pet] 输入模式已关闭";
     }
 
@@ -719,40 +723,22 @@ void PetController::setInputMode(bool on) {
 void PetController::onKeyEvent(quint32 vk, bool down) {
     if (!down) return;                            // 只在按下时触发
 
+    // 按键气泡：**每个键都要显示**，所以放在节流之前（节流只该管动作和回弹）
+    if (keyBubble_ && settings_.data.keyBubble && window_) {
+        keyBubble_->showKey(vk);
+        keyBubble_->placeAbove(window_->frameGeometry());
+    }
+
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
     if (now - lastInputTickMs_ < kInputCooldownMs) return;   // 节流
     lastInputTickMs_ = now;
 
     playAction(PetAction::Typing);
 
-    // 动态通道：给弹簧一个冲量，并按这个键在键盘上偏左/偏右给个横向分量。
-    // 这样"打左边的键它往左歪、打右边往右歪"，观感上就接近 BongoCat 的手跟着键走。
-    motion_.impulse(1.0, keyLateral(vk));
+    // 动态通道：给弹簧一个冲量（"一弹一弹"）。曾经还按键位左右加点横向/倾斜，
+    // 实测幅度调大也不明显，已去掉 —— 现在"按了哪个键"由按键气泡来交代。
+    motion_.impulse();
     startMotion();
-}
-
-double PetController::keyLateral(quint32 vk) {
-    // 只用虚拟键码粗估左右：字母按 QWERTY 三行的列号，数字按主键盘列。
-    // 不追求精确——它只是给"跟手"一点方向性，不是真的把手画到键上（那是阶段 2 的事）。
-    static const QString kRows[3] = { QStringLiteral("QWERTYUIOP"),
-                                      QStringLiteral("ASDFGHJKL"),
-                                      QStringLiteral("ZXCVBNM") };
-
-    if (vk >= 'A' && vk <= 'Z') {
-        const QChar c = QChar(char(vk));
-        for (const QString& row : kRows) {
-            const int col = row.indexOf(c);
-            if (col >= 0 && row.size() > 1) {
-                return (double(col) / double(row.size() - 1)) * 2.0 - 1.0;
-            }
-        }
-    }
-    if (vk >= '0' && vk <= '9') {
-        const int d = int(vk - '0');                       // 1..9,0
-        const double t = (d == 0) ? 0.95 : double(d - 1) / 8.0;
-        return t * 2.0 - 1.0;
-    }
-    return 0.0;   // 空格 / 回车 / 修饰键：正中间
 }
 
 void PetController::applyMotionParams() {
@@ -764,22 +750,18 @@ void PetController::applyMotionParams() {
     case 0:                                     // 关
         p.breathAmp = 0.0;
         p.bounceAmp = 0.0;
-        p.leanDeg = 0.0;
         break;
     case 1:                                     // 弱：只有回弹，不呼吸（静止时能真正停定时器）
         p.breathAmp = 0.0;
         p.bounceAmp = 0.05;
-        p.leanDeg = 4.0;
         break;
     case 3:                                     // 强
         p.breathAmp = 0.025;
         p.bounceAmp = 0.12;
-        p.leanDeg = 10.0;
         break;
-    default:                                    // 中：单次按键压扁 8%、横移约 17px、歪 4°
+    default:                                    // 中：单次按键压扁 8%
         p.breathAmp = 0.015;
         p.bounceAmp = 0.08;
-        p.leanDeg = 7.0;
         break;
     }
     motion_.setParams(p);
@@ -795,18 +777,6 @@ void PetController::startMotion() {
 
 void PetController::onMotionTick() {
     if (!window_ || !window_->renderer()) return;
-
-    // 拖拽倾斜：用"这一帧窗口移动了多少像素"当速度，**朝运动反方向倒**（惯性感：
-    // 像拎着一个玩偶往右甩，下半身跟着手走、上半身在后面拖）。
-    // 符号约定：rotateDeg > 0 = 逆时针 = 顶端往**左**，所以往右拖(vel>0)要用正值。
-    // （之前写成 -v，结果变成了"往移动方向倒"，方向正好相反。）
-    if (dragging_) {
-        const int x = window_->x();
-        const double v = double(x - lastDragX_);
-        lastDragX_ = x;
-        const double maxLean = motion_.params().leanDeg;
-        motion_.setLeanTarget(std::clamp(v * 0.7, -maxLean, maxLean));
-    }
 
     const double dt = motionClock_.restart() / 1000.0;
     if (!motion_.step(dt)) {
@@ -954,6 +924,18 @@ void PetController::rebuildMenu(QMenu* menu) {
     inputAction->setToolTip(QStringLiteral("开启后全局监听键盘（只取虚拟键码，不记录按键内容），"
                                            "你敲键时桌宠播放「输入」动作。会加重杀软误报。"));
     connect(inputAction, &QAction::toggled, this, [this](bool on) { setInputMode(on); });
+
+    // 按键气泡：输入模式下敲键时，在桌宠上方显示按下的键
+    auto* bubbleAction = menu->addAction(QStringLiteral("按键提示（气泡）"));
+    bubbleAction->setCheckable(true);
+    bubbleAction->setChecked(settings_.data.keyBubble);
+    bubbleAction->setToolTip(QStringLiteral("敲键时在桌宠上方冒个气泡显示刚按下的键。"
+                                            "只在屏幕上短暂显示，不记录、不落盘。"));
+    connect(bubbleAction, &QAction::toggled, this, [this](bool on) {
+        settings_.data.keyBubble = on;
+        settings_.save();
+        if (!on && keyBubble_) keyBubble_->hide();
+    });
 
     if (AutoStart::supported()) {
         auto* starter = menu->addAction(QStringLiteral("开机自启"));

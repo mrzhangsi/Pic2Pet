@@ -20,6 +20,7 @@ class QTimer;
 namespace pic2pet {
 
 class ActionSettingsDialog;
+class KeyBubble;
 class KeyboardMonitor;
 class PetWindow;
 
@@ -39,6 +40,7 @@ class PetController : public QObject {
     Q_OBJECT
 public:
     PetController(ClickThroughBackend backend, int size, bool useTray, QObject* parent = nullptr);
+    ~PetController() override;
 
     /**
      * 启动。cliMedia 非空则加载它，否则回退到上次记住的素材。
@@ -108,8 +110,6 @@ private:
     void applyMotionParams();
     /** 起动态定时器（静止后会自动停） */
     void startMotion();
-    /** 只用 vk 粗估这个键在键盘上偏左还是偏右，范围 [-1, 1] */
-    static double keyLateral(quint32 vk);
     void updateWindowSize();
     /** 当前是否有可播放的动画（无素材时的程序化圆盘也算） */
     bool animatable() const;
@@ -152,7 +152,7 @@ private:
     PetMotion motion_;
     QTimer* motionTimer_ = nullptr;
     QElapsedTimer motionClock_;
-    int lastDragX_ = 0;                     // 拖拽倾斜用：上一帧的窗口 x
+    KeyBubble* keyBubble_ = nullptr;        // 按键气泡；输入模式开启时才创建
 
     QElapsedTimer animClock_;
     mutable PerfProbe probe_;

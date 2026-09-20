@@ -54,6 +54,7 @@ void Settings::load() {
     loadAction("typing", data.actionTyping);
 
     data.inputMode = s.value(QStringLiteral("input/mode"), false).toBool();
+    data.keyBubble = s.value(QStringLiteral("input/keyBubble"), true).toBool();
     data.motionLevel = s.value(QStringLiteral("motion/level"), 2).toInt();
     if (data.motionLevel < 0) data.motionLevel = 0;
     if (data.motionLevel > 3) data.motionLevel = 3;
@@ -85,6 +86,7 @@ void Settings::save() {
     saveAction("typing", data.actionTyping);
 
     s.setValue(QStringLiteral("input/mode"), data.inputMode);
+    s.setValue(QStringLiteral("input/keyBubble"), data.keyBubble);
     s.setValue(QStringLiteral("motion/level"), data.motionLevel);
 
     s.setValue(QStringLiteral("window/x"), data.pos.x());

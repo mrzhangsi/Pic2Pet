@@ -13,6 +13,7 @@
 #include <QFontMetrics>
 #include <QFrame>
 #include <QHBoxLayout>
+#include <QIcon>
 #include <QImageReader>
 #include <QLabel>
 #include <QPixmap>
@@ -233,10 +234,18 @@ void SettingsWindow::buildSidebar(QWidget* sidebar) {
     auto* h = new QHBoxLayout(head);
     h->setContentsMargins(6, 2, 6, 0);
     h->setSpacing(8);
-    auto* dot = new QWidget;
-    dot->setFixedSize(20, 20);
-    dot->setStyleSheet(QStringLiteral("background:#007AFF;border-radius:6px;"));
-    h->addWidget(dot);
+    // 顶部放**真正的应用图标**（来自 app.qrc 的 :/app.ico），不是色块占位。
+    // 按 2 倍取图再交给 QLabel 按逻辑尺寸画，高分屏才不会糊。
+    auto* logo = new QLabel;
+    logo->setFixedSize(22, 22);
+    const QIcon appIcon(QStringLiteral(":/app.ico"));
+    if (appIcon.isNull()) {
+        // 资源万一丢了也别开天窗，退回一个蓝方块
+        logo->setStyleSheet(QStringLiteral("background:#007AFF;border-radius:6px;"));
+    } else {
+        logo->setPixmap(appIcon.pixmap(QSize(22, 22), 2.0));
+    }
+    h->addWidget(logo);
     h->addWidget(label(QStringLiteral("Pic2Pet"), QStringLiteral("rowTitle")));
     h->addStretch(1);
     v->addWidget(head);
@@ -371,30 +380,42 @@ QWidget* SettingsWindow::buildActionPage() {
         r.hold->setRange(kMinHoldMs, kMaxHoldMs);
         r.hold->setSingleStep(100);
         r.hold->setSuffix(QStringLiteral(" ms"));
-        r.hold->setFixedWidth(88);
-        r.hold->setToolTip(QStringLiteral("只在素材是静态图片时生效：显示这么久，然后回待机"));
+        r.hold->setFixedWidth(84);
+        r.hold->setAlignment(Qt::AlignCenter);
+        r.hold->setButtonSymbols(QAbstractSpinBox::NoButtons);   // 去掉老式上下箭头
+        r.hold->setToolTip(QStringLiteral("只在素材是静态图片时生效：显示这么久，然后回待机。\n"
+                                          "可以直接输入，也可以在框上滚轮调整。"));
         connect(r.hold, &QSpinBox::valueChanged, this, [this, a](int v) {
             if (!suppressSignals_) emit actionHoldChanged(a, v);
         });
         h->addWidget(r.hold, 0, Qt::AlignVCenter);
 
-        // 标签刻意不带省略号：这一行一共 4 个按钮 + 一个数字框，宽度很紧
+        // 4 个按钮自成一"组"：组内间距紧、与左边的数字框之间留大一点的间距，
+        // 视觉上才会读成"一个数字 + 一组操作"，而不是五个零散控件。
+        auto* btnGroup = new QWidget;
+        auto* bh = new QHBoxLayout(btnGroup);
+        bh->setContentsMargins(14, 0, 0, 0);
+        bh->setSpacing(2);
+
+        // 标签刻意不带省略号：这一行控件多，宽度很紧
         auto* choose = linkButton(QStringLiteral("素材"));
         connect(choose, &QPushButton::clicked, this, [this, a] { chooseActionMedia(a); });
-        h->addWidget(choose, 0, Qt::AlignVCenter);
+        bh->addWidget(choose);
 
         auto* audio = linkButton(QStringLiteral("音频"));
         connect(audio, &QPushButton::clicked, this, [this, a] { chooseActionAudio(a); });
-        h->addWidget(audio, 0, Qt::AlignVCenter);
+        bh->addWidget(audio);
 
         auto* preview = linkButton(QStringLiteral("试播"));
         connect(preview, &QPushButton::clicked, this,
                 [this, a] { emit previewActionRequested(a); });
-        h->addWidget(preview, 0, Qt::AlignVCenter);
+        bh->addWidget(preview);
 
         r.clear = linkButton(QStringLiteral("清除"));
         connect(r.clear, &QPushButton::clicked, this, [this, a] { emit actionCleared(a); });
-        h->addWidget(r.clear, 0, Qt::AlignVCenter);
+        bh->addWidget(r.clear);
+
+        h->addWidget(btnGroup, 0, Qt::AlignVCenter);
 
         actionRows_.insert(int(a), r);
         root->addWidget(row);

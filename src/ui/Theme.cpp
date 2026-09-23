@@ -49,10 +49,11 @@ QPushButton#ghost:pressed { background: #ECECEE; }
 
 QPushButton#link {
     color: #007AFF; background: transparent; border: none;
-    padding: 2px 6px; font-size: 12px;
+    padding: 3px 9px; font-size: 12px; border-radius: 6px;
 }
-QPushButton#link:hover    { color: #0A84FF; }
-QPushButton#link:disabled { color: #C7C7CC; }
+QPushButton#link:hover    { color: #0A84FF; background: rgba(0, 122, 255, 0.10); }
+QPushButton#link:pressed  { background: rgba(0, 122, 255, 0.18); }
+QPushButton#link:disabled { color: #C7C7CC; background: transparent; }
 
 QSlider::groove:horizontal   { height: 4px; background: #C7C7CC; border-radius: 2px; }
 QSlider::sub-page:horizontal { height: 4px; background: #007AFF; border-radius: 2px; }
@@ -62,10 +63,18 @@ QSlider::handle:horizontal {
 }
 QSlider::handle:horizontal:hover { border-color: #007AFF; }
 
+/* 数字框做成"干净的输入框"：文字居中，**不要那对 Windows 老式上下箭头**。
+   原因有两个：① 箭头会压在文字上（给足 padding 也只能缓解）；
+   ② 那种立体小箭头本身就很旧，跟这套苹果风不搭。
+   改成纯输入框 + 滚轮调整，宽度也省下来了。 */
 QSpinBox {
     background: #FFFFFF; border: 1px solid #D2D2D7; border-radius: 6px;
-    padding: 3px 6px; font-size: 12px; selection-background-color: #007AFF;
+    padding: 4px 8px; font-size: 12px; selection-background-color: #007AFF;
 }
+QSpinBox::up-button, QSpinBox::down-button {
+    width: 0px; height: 0px; border: none; background: transparent;
+}
+QSpinBox:focus { border-color: #007AFF; }
 /* 必须显式写 :disabled —— 一旦给控件设了 QSS，Qt 就不再按调色板画禁用态，
    不写这条的话"禁用了"和"能点"长得一模一样（动作页的停留框踩过） */
 QSpinBox:disabled {

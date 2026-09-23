@@ -19,7 +19,6 @@ class QTimer;
 
 namespace pic2pet {
 
-class ActionSettingsDialog;
 class KeyBubble;
 class KeyboardMonitor;
 class PetWindow;
@@ -57,7 +56,7 @@ public:
     /** 打开新版「设置」窗口（左侧边栏 + 分页）；page 用来直接跳到某一页（开发/截图用） */
     void openSettings(int page = 0);
 
-    /** 打开"动作设置"窗口（按需创建、关闭即释放） */
+    /** 打开设置窗口的「动作」页（原独立动作设置窗口已并入设置窗口） */
     void openActionSettings();
 
     /**
@@ -116,6 +115,8 @@ private:
     void refreshSettingsWindow();
     /** 外观页改动：落盘 + 立即应用 */
     void applyAppearance(int scalePercent, int opacityPercent, bool alwaysOnTop, bool paused);
+    /** 取某个动作的配置（设置窗口改完由这里落盘） */
+    ActionConfig& actionConfig(PetAction a);
     /** 弹素材选择框（右键菜单与设置窗口共用同一段逻辑） */
     void chooseMediaFromDialog();
     /** 起动态定时器（静止后会自动停） */
@@ -153,7 +154,6 @@ private:
     QSystemTrayIcon* tray_ = nullptr;
     QMenu* trayMenu_ = nullptr;
     // 动作设置窗口：无父对象 + WA_DeleteOnClose，关闭即自删；靠 destroyed() 信号置空
-    ActionSettingsDialog* actionDialog_ = nullptr;
     KeyboardMonitor* keyboard_ = nullptr;   // 输入模式用；不启用时根本不创建
     SettingsWindow* settingsWindow_ = nullptr;   // 设置窗口，首次打开时创建，之后复用
     qint64 lastInputTickMs_ = 0;            // 打字节流的上一次时刻

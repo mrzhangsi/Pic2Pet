@@ -1,12 +1,16 @@
 #pragma once
 
+#include <QHash>
 #include <QWidget>
 
+#include "ActionSet.h"   // PetAction
 #include "Icons.h"
 #include "Settings.h"
 
 class QLabel;
+class QPushButton;
 class QSlider;
+class QSpinBox;
 class QStackedWidget;
 class QTimer;
 class QVBoxLayout;
@@ -46,7 +50,14 @@ signals:
     void motionLevelChanged(int level);
     void chooseMediaRequested();
     void recentMediaChosen(const QString& path);
-    void openActionSettingsRequested();
+
+    // ---- 动作页：逐项改动 ----
+    void actionMediaChosen(PetAction action, const QString& path);
+    void actionAudioChosen(PetAction action, const QString& path);
+    void actionHoldChanged(PetAction action, int holdMs);
+    void actionCleared(PetAction action);
+    void previewActionRequested(PetAction action);
+    void actionsResetRequested();
     /**
      * 外观这几项改了。**值随信号一起带出去**，窗口自己**不写 settings** ——
      * 窗口只发意图，落盘与生效都由控制器做（避免两处都改状态、互相对不上）。
@@ -58,7 +69,20 @@ signals:
 
 private:
     QWidget* buildMediaPage();
+    struct ActionRow {
+        QLabel* thumb = nullptr;
+        QLabel* sub = nullptr;
+        QSpinBox* hold = nullptr;
+        QPushButton* clear = nullptr;
+    };
+
     QWidget* buildActionPage();
+    void refreshActions();
+    void chooseActionMedia(PetAction a);
+    void chooseActionAudio(PetAction a);
+    /** 该动作实际会用的素材（待机没单独指定时回退到"当前素材"） */
+    QString effectiveMediaFor(PetAction a) const;
+    static bool isAnimatedMedia(const QString& path);
     QWidget* buildInputPage();
     QWidget* buildMotionPage();
     QWidget* buildAppearancePage();
@@ -88,6 +112,8 @@ private:
 
     ToggleSwitch* autoStartToggle_ = nullptr;
     QLabel* configPathLabel_ = nullptr;
+
+    QHash<int, ActionRow> actionRows_;   // key = int(PetAction)
 
     // 滑块拖动时合并上报：50ms 内的连续变化只发一次，避免一边拖一边疯狂写 INI
     QTimer* appearanceCoalesce_ = nullptr;

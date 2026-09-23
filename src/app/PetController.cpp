@@ -1,6 +1,5 @@
 #include "PetController.h"
 
-#include "ActionSettingsDialog.h"
 #include "AudioPlayer.h"
 #include "AutoStart.h"
 #include "KeyBubble.h"
@@ -285,21 +284,20 @@ void PetController::reloadActions() {
     qInfo().noquote() << QStringLiteral("[pet] 动作已更新 [%1]").arg(actions_.summary());
 }
 
-void PetController::openActionSettings() {
-    if (!actionDialog_) {
-        // 无父窗口：它是普通窗口，不能跟桌宠的"透明/置顶/无边框"缠在一起。
-        // WA_DeleteOnClose + QPointer：关掉即释放，不长期占内存。
-        auto* dlg = new ActionSettingsDialog(&settings_);
-        dlg->setAttribute(Qt::WA_DeleteOnClose);
-        connect(dlg, &ActionSettingsDialog::actionsChanged, this, &PetController::reloadActions);
-        connect(dlg, &ActionSettingsDialog::previewRequested, this,
-                [this](PetAction a) { playAction(a, true); });
-        connect(dlg, &QObject::destroyed, this, [this] { actionDialog_ = nullptr; });
-        actionDialog_ = dlg;
+ActionConfig& PetController::actionConfig(PetAction a) {
+    switch (a) {
+    case PetAction::Idle:        return settings_.data.actionIdle;
+    case PetAction::Click:       return settings_.data.actionClick;
+    case PetAction::DoubleClick: return settings_.data.actionDoubleClick;
+    case PetAction::Drag:        return settings_.data.actionDrag;
+    case PetAction::Typing:      return settings_.data.actionTyping;
     }
-    actionDialog_->show();
-    actionDialog_->raise();
-    actionDialog_->activateWindow();
+    return settings_.data.actionIdle;   // 不可达
+}
+
+void PetController::openActionSettings() {
+    // 动作设置已经并进新版设置窗口的「动作」页（原独立窗口已删除）
+    openSettings(1);
 }
 
 void PetController::playAction(PetAction a, bool force) {
@@ -772,8 +770,48 @@ void PetController::openSettings(int page) {
                     if (loadMedia(path)) reloadActions();
                     refreshSettingsWindow();
                 });
-        connect(settingsWindow_, &SettingsWindow::openActionSettingsRequested, this,
-                [this] { openActionSettings(); });
+        // ---- 动作页 ----
+        connect(settingsWindow_, &SettingsWindow::actionMediaChosen, this,
+                [this](PetAction a, const QString& path) {
+                    actionConfig(a).media = path;
+                    settings_.save();
+                    reloadActions();
+                    refreshSettingsWindow();
+                });
+        connect(settingsWindow_, &SettingsWindow::actionAudioChosen, this,
+                [this](PetAction a, const QString& path) {
+                    actionConfig(a).audio = path;
+                    settings_.save();
+                    reloadActions();
+                    refreshSettingsWindow();
+                });
+        connect(settingsWindow_, &SettingsWindow::actionHoldChanged, this,
+                [this](PetAction a, int holdMs) {
+                    actionConfig(a).holdMs = holdMs;
+                    settings_.save();
+                    reloadActions();
+                });
+        connect(settingsWindow_, &SettingsWindow::actionCleared, this, [this](PetAction a) {
+            ActionConfig& cfg = actionConfig(a);
+            if (cfg.media.isEmpty() && cfg.audio.isEmpty()) return;
+            cfg.media.clear();
+            cfg.audio.clear();
+            settings_.save();
+            reloadActions();
+            refreshSettingsWindow();
+        });
+        connect(settingsWindow_, &SettingsWindow::actionsResetRequested, this, [this] {
+            for (PetAction a : { PetAction::Idle, PetAction::Click, PetAction::DoubleClick,
+                                 PetAction::Drag, PetAction::Typing }) {
+                actionConfig(a).media.clear();
+                actionConfig(a).audio.clear();
+            }
+            settings_.save();
+            reloadActions();
+            refreshSettingsWindow();
+        });
+        connect(settingsWindow_, &SettingsWindow::previewActionRequested, this,
+                [this](PetAction a) { playAction(a, true); });
         connect(settingsWindow_, &SettingsWindow::appearanceChanged, this,
                 [this](int scale, int opacity, bool onTop, bool paused) {
                     applyAppearance(scale, opacity, onTop, paused);
@@ -1020,7 +1058,7 @@ void PetController::rebuildMenu(QMenu* menu) {
 
     menu->addSeparator();
 
-    menu->addAction(QStringLiteral("动作设置…"), this, [this] { openActionSettings(); });
+    menu->addAction(QStringLiteral("动作设置…"), this, [this] { openSettings(1); });
 
     // 动态效果：呼吸 / 打字回弹 / 拖拽倾斜。
     // 注意"中/强"会开着呼吸 = 一直在动，静态素材的 CPU 会从 ~0 变成持续重绘。

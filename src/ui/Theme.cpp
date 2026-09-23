@@ -66,6 +66,11 @@ QSpinBox {
     background: #FFFFFF; border: 1px solid #D2D2D7; border-radius: 6px;
     padding: 3px 6px; font-size: 12px; selection-background-color: #007AFF;
 }
+/* 必须显式写 :disabled —— 一旦给控件设了 QSS，Qt 就不再按调色板画禁用态，
+   不写这条的话"禁用了"和"能点"长得一模一样（动作页的停留框踩过） */
+QSpinBox:disabled {
+    background: #F5F5F7; color: #C7C7CC; border-color: #E5E5EA;
+}
 
 QScrollArea { background: transparent; border: none; }
 QScrollArea > QWidget > QWidget { background: transparent; }

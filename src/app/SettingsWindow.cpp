@@ -8,13 +8,18 @@
 #include <QAbstractButton>
 #include <QDebug>
 #include <QDesktopServices>
+#include <QFileDialog>
 #include <QFileInfo>
+#include <QFontMetrics>
 #include <QFrame>
 #include <QHBoxLayout>
+#include <QImageReader>
 #include <QLabel>
 #include <QPixmap>
 #include <QPushButton>
+#include <QSignalBlocker>
 #include <QSlider>
+#include <QSpinBox>
 #include <QStackedWidget>
 #include <QTimer>
 #include <QUrl>
@@ -28,6 +33,8 @@ namespace {
 
 constexpr int kSidebarWidth = 190;
 constexpr int kAppearanceCoalesceMs = 50;
+/** 动作页副标题的省略宽度（见 refreshActions 里的说明） */
+constexpr int kActionSubElideWidth = 220;
 
 /** 侧栏每项的图标色（苹果那种一个分类一个色） */
 const QColor kNavColors[] = {
@@ -38,6 +45,42 @@ const QColor kNavColors[] = {
     QColor(0x5A, 0xC8, 0xFA),   // 外观
     QColor(0x8E, 0x8E, 0x93),   // 通用
 };
+
+const PetAction kAllActions[] = { PetAction::Idle, PetAction::Click, PetAction::DoubleClick,
+                                  PetAction::Drag, PetAction::Typing };
+
+QString actionHint(PetAction a) {
+    switch (a) {
+    case PetAction::Idle:        return QStringLiteral("循环");
+    case PetAction::Click:       return QStringLiteral("点一下播一次");
+    case PetAction::DoubleClick: return QStringLiteral("双击播一次");
+    case PetAction::Drag:        return QStringLiteral("拖拽时循环");
+    case PetAction::Typing:      return QStringLiteral("敲键盘时触发");
+    }
+    return QString();
+}
+
+/** 注意：不含 webp —— Qt 6.11 官方包没有 WebP 图像插件，解不了 */
+QString mediaFilter() {
+    return QStringLiteral(
+        "图片与动图 (*.gif *.png *.apng *.jpg *.jpeg *.bmp);;所有文件 (*.*)");
+}
+
+QString audioFilter() {
+    return QStringLiteral(
+        "音频 (*.wav *.mp3 *.wma *.m4a *.aac *.ogg *.mid *.midi);;所有文件 (*.*)");
+}
+
+const ActionConfig& configOf(const Settings& s, PetAction a) {
+    switch (a) {
+    case PetAction::Idle:        return s.data.actionIdle;
+    case PetAction::Click:       return s.data.actionClick;
+    case PetAction::DoubleClick: return s.data.actionDoubleClick;
+    case PetAction::Drag:        return s.data.actionDrag;
+    case PetAction::Typing:      return s.data.actionTyping;
+    }
+    return s.data.actionIdle;   // 不可达
+}
 
 QLabel* label(const QString& text, const QString& objectName) {
     auto* l = new QLabel(text);
@@ -145,8 +188,8 @@ SettingsWindow::SettingsWindow(Settings* settings, QWidget* parent)
     setAttribute(Qt::WA_StyledBackground, true);
     setWindowTitle(QStringLiteral("Pic2Pet 设置"));
     setStyleSheet(theme::styleSheet());
-    resize(820, 580);
-    setMinimumSize(720, 500);
+    resize(880, 600);
+    setMinimumSize(820, 520);
 
     auto* root = new QHBoxLayout(this);
     root->setContentsMargins(0, 0, 0, 0);
@@ -291,31 +334,171 @@ QWidget* SettingsWindow::buildMediaPage() {
 
 QWidget* SettingsWindow::buildActionPage() {
     auto* page = newPage(QStringLiteral("动作"),
-                         QStringLiteral("给待机 / 单击 / 双击 / 拖拽 / 输入各自指定素材与音频。"));
+                         QStringLiteral("给每个动作单独指定素材与音频，两者互相独立——可以只配其一。"
+                                        "停留时长只在素材是静态图片时生效。"));
 
     auto* c = card();
-    auto* row = new QWidget;
-    auto* h = new QHBoxLayout(row);
-    h->setContentsMargins(16, 14, 16, 14);
-    h->setSpacing(12);
-    auto* text = new QVBoxLayout;
-    text->setSpacing(2);
-    text->addWidget(label(QStringLiteral("逐项配置"), QStringLiteral("rowTitle")));
-    auto* sub = label(QStringLiteral("素材与音频互相独立；静态图片还能单独设停留时长。"
-                                     "这一页的界面正在按新样式重做，暂时先开原窗口。"),
-                      QStringLiteral("rowSub"));
-    sub->setWordWrap(true);
-    text->addWidget(sub);
-    h->addLayout(text, 1);
-    auto* open = primaryButton(QStringLiteral("打开动作设置…"));
-    connect(open, &QPushButton::clicked, this, [this] { emit openActionSettingsRequested(); });
-    h->addWidget(open, 0, Qt::AlignVCenter);
-    qobject_cast<QVBoxLayout*>(c->layout())->addWidget(row);
+    auto* root = qobject_cast<QVBoxLayout*>(c->layout());
+
+    const int count = int(sizeof(kAllActions) / sizeof(kAllActions[0]));
+    for (int i = 0; i < count; ++i) {
+        const PetAction a = kAllActions[i];
+
+        auto* row = new QWidget;
+        auto* h = new QHBoxLayout(row);
+        h->setContentsMargins(16, 10, 16, 10);
+        h->setSpacing(12);
+
+        ActionRow r;
+
+        r.thumb = new QLabel;
+        r.thumb->setFixedSize(40, 40);
+        r.thumb->setAlignment(Qt::AlignCenter);
+        r.thumb->setStyleSheet(QStringLiteral(
+            "background:#FFFFFF;border:1px solid #E5E5EA;border-radius:8px;"));
+        h->addWidget(r.thumb, 0, Qt::AlignVCenter);
+
+        auto* text = new QVBoxLayout;
+        text->setSpacing(2);
+        text->addWidget(label(QStringLiteral("%1（%2）")
+                                  .arg(ActionSet::actionName(a), actionHint(a)),
+                              QStringLiteral("rowTitle")));
+        r.sub = label(QString(), QStringLiteral("rowSub"));
+        text->addWidget(r.sub);
+        h->addLayout(text, 1);
+
+        r.hold = new QSpinBox;
+        r.hold->setRange(kMinHoldMs, kMaxHoldMs);
+        r.hold->setSingleStep(100);
+        r.hold->setSuffix(QStringLiteral(" ms"));
+        r.hold->setFixedWidth(88);
+        r.hold->setToolTip(QStringLiteral("只在素材是静态图片时生效：显示这么久，然后回待机"));
+        connect(r.hold, &QSpinBox::valueChanged, this, [this, a](int v) {
+            if (!suppressSignals_) emit actionHoldChanged(a, v);
+        });
+        h->addWidget(r.hold, 0, Qt::AlignVCenter);
+
+        // 标签刻意不带省略号：这一行一共 4 个按钮 + 一个数字框，宽度很紧
+        auto* choose = linkButton(QStringLiteral("素材"));
+        connect(choose, &QPushButton::clicked, this, [this, a] { chooseActionMedia(a); });
+        h->addWidget(choose, 0, Qt::AlignVCenter);
+
+        auto* audio = linkButton(QStringLiteral("音频"));
+        connect(audio, &QPushButton::clicked, this, [this, a] { chooseActionAudio(a); });
+        h->addWidget(audio, 0, Qt::AlignVCenter);
+
+        auto* preview = linkButton(QStringLiteral("试播"));
+        connect(preview, &QPushButton::clicked, this,
+                [this, a] { emit previewActionRequested(a); });
+        h->addWidget(preview, 0, Qt::AlignVCenter);
+
+        r.clear = linkButton(QStringLiteral("清除"));
+        connect(r.clear, &QPushButton::clicked, this, [this, a] { emit actionCleared(a); });
+        h->addWidget(r.clear, 0, Qt::AlignVCenter);
+
+        actionRows_.insert(int(a), r);
+        root->addWidget(row);
+        if (i + 1 < count) root->addWidget(separator());
+    }
+
+    auto* tail = new QWidget;
+    auto* th = new QHBoxLayout(tail);
+    th->setContentsMargins(0, 0, 0, 0);
+    th->setSpacing(12);
+    th->addWidget(label(QStringLiteral("待机没单独指定素材时，会自动沿用「当前素材」。"),
+                        QStringLiteral("hint")), 1);
+    auto* reset = ghostButton(QStringLiteral("全部清除"));
+    connect(reset, &QPushButton::clicked, this, [this] { emit actionsResetRequested(); });
+    th->addWidget(reset, 0);
 
     auto* lay = pageLayout(page);
     lay->addWidget(c);
+    lay->addSpacing(10);
+    lay->addWidget(tail);
     lay->addStretch(1);
     return page;
+}
+
+QString SettingsWindow::effectiveMediaFor(PetAction a) const {
+    const ActionConfig& cfg = configOf(*settings_, a);
+    if (!cfg.media.isEmpty()) return cfg.media;
+    if (a == PetAction::Idle) return settings_->data.lastMedia;   // 回退到"当前素材"
+    return QString();
+}
+
+bool SettingsWindow::isAnimatedMedia(const QString& path) {
+    if (path.isEmpty()) return false;
+    QImageReader reader(path);
+    if (!reader.canRead()) return false;
+    return reader.imageCount() > 1;   // 多帧 = 动图
+}
+
+void SettingsWindow::chooseActionMedia(PetAction a) {
+    const QString cur = configOf(*settings_, a).media;
+    const QString path = QFileDialog::getOpenFileName(
+        this, QStringLiteral("为「%1」选择素材").arg(ActionSet::actionName(a)), cur, mediaFilter());
+    if (path.isEmpty()) return;             // 取消不动；要清空用「清除」
+    emit actionMediaChosen(a, path);
+}
+
+void SettingsWindow::chooseActionAudio(PetAction a) {
+    const QString cur = configOf(*settings_, a).audio;
+    const QString path = QFileDialog::getOpenFileName(
+        this, QStringLiteral("为「%1」选择音频").arg(ActionSet::actionName(a)), cur, audioFilter());
+    if (path.isEmpty()) return;
+    emit actionAudioChosen(a, path);
+}
+
+void SettingsWindow::refreshActions() {
+    const int count = int(sizeof(kAllActions) / sizeof(kAllActions[0]));
+    for (int i = 0; i < count; ++i) {
+        const PetAction a = kAllActions[i];
+        auto it = actionRows_.find(int(a));
+        if (it == actionRows_.end()) continue;
+        ActionRow& r = it.value();
+        const ActionConfig& cfg = configOf(*settings_, a);
+
+        // 缩略图
+        const QString eff = effectiveMediaFor(a);
+        QPixmap pm;
+        if (!eff.isEmpty()) pm.load(eff);
+        if (pm.isNull()) {
+            r.thumb->setPixmap(QPixmap());
+            r.thumb->setText(QStringLiteral("—"));
+        } else {
+            r.thumb->setText(QString());
+            r.thumb->setPixmap(pm.scaled(r.thumb->size() - QSize(8, 8), Qt::KeepAspectRatio,
+                                         Qt::SmoothTransformation));
+        }
+
+        // 副标题：素材 + 音频。这一列比较窄，文件名要省略，否则会被硬裁断。
+        // 用**固定宽度**而不是 r.sub->width()：首次 refresh 时布局还没算完，宽度是 0，
+        // 按它算出来的省略结果全是空的。窗口最小宽度 820 时这一列仍有 ~230px，220 是安全的。
+        const QFontMetrics fm(r.sub->font());
+        const auto elide = [&fm](const QString& name) {
+            return fm.elidedText(name, Qt::ElideMiddle, kActionSubElideWidth);
+        };
+        QString mediaText;
+        if (!cfg.media.isEmpty()) {
+            mediaText = elide(QFileInfo(cfg.media).fileName());
+        } else if (a == PetAction::Idle && !settings_->data.lastMedia.isEmpty()) {
+            mediaText = QStringLiteral("沿用当前素材");
+        } else {
+            mediaText = QStringLiteral("未指定");
+        }
+        const QString audioText = cfg.audio.isEmpty()
+                                      ? QStringLiteral("无")
+                                      : elide(QFileInfo(cfg.audio).fileName());
+        r.sub->setText(QStringLiteral("%1　·　音频：%2").arg(mediaText, audioText));
+
+        // 停留：只有"静态图片"才有意义，动图不需要（按自身时长播完）
+        {
+            const QSignalBlocker blocker(r.hold);
+            r.hold->setValue(cfg.holdMs);
+            r.hold->setEnabled(!eff.isEmpty() && !isAnimatedMedia(eff));
+        }
+        r.clear->setEnabled(!cfg.media.isEmpty() || !cfg.audio.isEmpty());
+    }
 }
 
 QWidget* SettingsWindow::buildInputPage() {
@@ -523,6 +706,7 @@ void SettingsWindow::refresh() {
 
     refreshMedia();
     refreshRecent();
+    refreshActions();
 
     suppressSignals_ = false;
 }

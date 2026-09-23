@@ -13,8 +13,6 @@ add_executable(Pic2Pet
     PetController.cpp
     Settings.h
     Settings.cpp
-    ActionSettingsDialog.h
-    ActionSettingsDialog.cpp
     PetMotion.h
     PetMotion.cpp
     KeyBubble.h

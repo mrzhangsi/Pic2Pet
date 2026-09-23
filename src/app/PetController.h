@@ -23,6 +23,7 @@ class ActionSettingsDialog;
 class KeyBubble;
 class KeyboardMonitor;
 class PetWindow;
+class SettingsWindow;
 
 /**
  * 装配中心：把窗口、渲染、素材播放、穿透调度、配置与性能采样串起来。
@@ -52,6 +53,9 @@ public:
 
     /** 抓取当前渲染结果（离屏，不依赖窗口是否可见），用于自动化验证渲染路径 */
     bool grabFramebuffer(const QString& path);
+
+    /** 打开新版「设置」窗口（左侧边栏 + 分页）；page 用来直接跳到某一页（开发/截图用） */
+    void openSettings(int page = 0);
 
     /** 打开"动作设置"窗口（按需创建、关闭即释放） */
     void openActionSettings();
@@ -108,6 +112,12 @@ private:
     QString audioFor(PetAction a) const;
     /** 按设置强度填动态通道的参数 */
     void applyMotionParams();
+    /** 把设置窗口里的控件与真实状态对齐（窗口只发意图、不写设置，所以每次都要回灌） */
+    void refreshSettingsWindow();
+    /** 外观页改动：落盘 + 立即应用 */
+    void applyAppearance(int scalePercent, int opacityPercent, bool alwaysOnTop, bool paused);
+    /** 弹素材选择框（右键菜单与设置窗口共用同一段逻辑） */
+    void chooseMediaFromDialog();
     /** 起动态定时器（静止后会自动停） */
     void startMotion();
     void updateWindowSize();
@@ -145,6 +155,7 @@ private:
     // 动作设置窗口：无父对象 + WA_DeleteOnClose，关闭即自删；靠 destroyed() 信号置空
     ActionSettingsDialog* actionDialog_ = nullptr;
     KeyboardMonitor* keyboard_ = nullptr;   // 输入模式用；不启用时根本不创建
+    SettingsWindow* settingsWindow_ = nullptr;   // 设置窗口，首次打开时创建，之后复用
     qint64 lastInputTickMs_ = 0;            // 打字节流的上一次时刻
     int ticksThisSecond_ = 0;               // 播放定时器实际唤醒次数（诊断用）
 

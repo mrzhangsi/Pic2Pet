@@ -7,6 +7,8 @@
 #include "KeyboardMonitor.h"
 #include "PetRenderer.h"
 #include "PetWindow.h"
+#include "SettingsWindow.h"
+#include "Theme.h"
 
 #include <QAction>
 #include <QActionGroup>
@@ -707,6 +709,96 @@ void PetController::onDoubleClicked() {
     playAction(PetAction::DoubleClick);
 }
 
+void PetController::chooseMediaFromDialog() {
+    if (!window_) return;
+    menuOpen_ = true;      // 对话框期间保持"能收鼠标"，并且不要反复切窗口样式
+    const QString path = QFileDialog::getOpenFileName(
+        window_, QStringLiteral("选择桌宠素材"), QString(),
+        QStringLiteral("图片与动图 (*.gif *.png *.apng *.jpg *.jpeg *.bmp);;所有文件 (*.*)"));
+    menuOpen_ = false;
+    if (!path.isEmpty()) {
+        loadMedia(path);
+        refreshSettingsWindow();
+    }
+}
+
+void PetController::refreshSettingsWindow() {
+    if (!settingsWindow_) return;
+    settingsWindow_->refresh();
+    settingsWindow_->setAutoStartState(AutoStart::supported(), AutoStart::isEnabled());
+    settingsWindow_->setPausedState(paused_);
+}
+
+void PetController::applyAppearance(int scalePercent, int opacityPercent, bool alwaysOnTop,
+                                    bool paused) {
+    setScalePercent(scalePercent);
+
+    const double opacity = opacityPercent / 100.0;
+    if (!qFuzzyCompare(settings_.data.opacity, opacity)) {
+        settings_.data.opacity = opacity;
+        if (window_) window_->setWindowOpacity(opacity);
+    }
+
+    if (settings_.data.alwaysOnTop != alwaysOnTop) {
+        settings_.data.alwaysOnTop = alwaysOnTop;
+        if (window_) {
+            window_->setWindowFlag(Qt::WindowStaysOnTopHint, alwaysOnTop);
+            window_->show();
+        }
+    }
+
+    setPaused(paused);
+    settings_.save();
+}
+
+void PetController::openSettings(int page) {
+    if (!settingsWindow_) {
+        settingsWindow_ = new SettingsWindow(&settings_, nullptr);
+
+        // 窗口只发意图，落盘与生效都在这里做 —— 做完回灌一次，保证 UI 与真实状态一致
+        connect(settingsWindow_, &SettingsWindow::inputModeChanged, this,
+                [this](bool on) { setInputMode(on); refreshSettingsWindow(); });
+        connect(settingsWindow_, &SettingsWindow::keyBubbleChanged, this, [this](bool on) {
+            settings_.data.keyBubble = on;
+            settings_.save();
+            if (!on && keyBubble_) keyBubble_->hide();
+        });
+        connect(settingsWindow_, &SettingsWindow::motionLevelChanged, this,
+                [this](int level) { setMotionLevel(level); });
+        connect(settingsWindow_, &SettingsWindow::chooseMediaRequested, this,
+                [this] { chooseMediaFromDialog(); });
+        connect(settingsWindow_, &SettingsWindow::recentMediaChosen, this,
+                [this](const QString& path) {
+                    if (loadMedia(path)) reloadActions();
+                    refreshSettingsWindow();
+                });
+        connect(settingsWindow_, &SettingsWindow::openActionSettingsRequested, this,
+                [this] { openActionSettings(); });
+        connect(settingsWindow_, &SettingsWindow::appearanceChanged, this,
+                [this](int scale, int opacity, bool onTop, bool paused) {
+                    applyAppearance(scale, opacity, onTop, paused);
+                    refreshSettingsWindow();
+                });
+        connect(settingsWindow_, &SettingsWindow::autoStartChanged, this, [this](bool on) {
+            if (AutoStart::supported()) AutoStart::setEnabled(on);
+            refreshSettingsWindow();
+        });
+        connect(settingsWindow_, &SettingsWindow::hidePetRequested, this, [this] {
+            if (window_) window_->hide();
+        });
+        connect(settingsWindow_, &SettingsWindow::resetPlacementRequested, this, [this] {
+            resetPlacement();
+            refreshSettingsWindow();
+        });
+    }
+
+    refreshSettingsWindow();
+    settingsWindow_->showPage(page);
+    settingsWindow_->show();
+    settingsWindow_->raise();
+    settingsWindow_->activateWindow();
+}
+
 void PetController::setInputMode(bool on) {
     settings_.data.inputMode = on;
 
@@ -854,15 +946,9 @@ void PetController::onWheelZoomed(int steps) {
 void PetController::rebuildMenu(QMenu* menu) {
     menu->clear();
 
-    menu->addAction(QStringLiteral("打开素材…"), this, [this] {
-        if (!window_) return;
-        menuOpen_ = true;
-        const QString path = QFileDialog::getOpenFileName(
-            window_, QStringLiteral("选择桌宠素材"), QString(),
-            QStringLiteral("图片与动图 (*.gif *.png *.apng *.jpg *.jpeg *.bmp);;所有文件 (*.*)"));
-        menuOpen_ = false;
-        if (!path.isEmpty()) loadMedia(path);
-    });
+    menu->addAction(QStringLiteral("设置…"), this, [this] { openSettings(); });
+
+    menu->addAction(QStringLiteral("打开素材…"), this, [this] { chooseMediaFromDialog(); });
 
     if (!settings_.data.recentMedia.isEmpty()) {
         auto* recent = menu->addMenu(QStringLiteral("最近素材"));
@@ -1001,6 +1087,9 @@ void PetController::rebuildMenu(QMenu* menu) {
 
     menu->addSeparator();
     menu->addAction(QStringLiteral("退出"), qApp, &QCoreApplication::quit);
+
+    // 菜单是顶层窗口，不会从设置窗口继承样式，得单独套一份
+    menu->setStyleSheet(theme::menuStyleSheet());
 }
 
 void PetController::onContextMenu(const QPoint& globalPos) {

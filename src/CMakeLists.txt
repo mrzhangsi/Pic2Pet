@@ -9,6 +9,9 @@ add_subdirectory(media)
 # M3：输入监听（全局键盘 / "输入模式"）。注意这是全项目唯一的挂钩式能力，见 src/input/README.md
 add_subdirectory(input)
 
+# M3：设计系统与可复用控件（浅色苹果风）。只依赖 Qt，不认识业务；设置窗口在 app/
+add_subdirectory(ui)
+
 # 后续里程碑接入，目录已建好（见各目录 README.md）
 # add_subdirectory(psd)        # M2  PSD 只读解析 + rigger 装配 + .petbin
 # add_subdirectory(rig)        # M2  RigParams / deform / 弹簧物理 / 表情 / 动作

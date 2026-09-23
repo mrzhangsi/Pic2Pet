@@ -7,6 +7,7 @@
 
 #include "ClickThrough.h"
 #include "PetController.h"
+#include "Theme.h"
 
 namespace {
 
@@ -31,6 +32,7 @@ int main(int argc, char** argv) {
     QApplication::setApplicationVersion(QStringLiteral("0.1.0"));
     QApplication::setWindowIcon(QIcon(QStringLiteral(":/app.ico")));   // 来自 app.qrc
     QApplication::setQuitOnLastWindowClosed(false);   // 托盘模式下关窗不退出
+    pic2pet::theme::applyAppStyle(&app);              // 界面字体（样式表只挂在设置窗口上）
 
     QCommandLineParser parser;
     parser.setApplicationDescription(QStringLiteral("Pic2Pet：透明桌宠，支持 GIF / APNG / 静态图"));
@@ -61,6 +63,12 @@ int main(int argc, char** argv) {
     QCommandLineOption noTrayOption(QStringLiteral("no-tray"),
                                     QStringLiteral("不显示系统托盘图标"));
     parser.addOption(noTrayOption);
+
+    QCommandLineOption settingsOption(
+        QStringLiteral("settings"),
+        QStringLiteral("启动后直接打开设置窗口，可带页号 0~5（开发 / 截图验证用）"),
+        QStringLiteral("page"), QStringLiteral("0"));
+    parser.addOption(settingsOption);
 
     QCommandLineOption grabOption(
         QStringLiteral("grab"),
@@ -105,6 +113,12 @@ int main(int argc, char** argv) {
             QCoreApplication::quit();
         });
         return app.exec();
+    }
+
+    if (parser.isSet(settingsOption)) {
+        bool pageOk = false;
+        const int page = parser.value(settingsOption).toInt(&pageOk);
+        controller.openSettings(pageOk ? page : 0);
     }
 
     qInfo().noquote() << QStringLiteral("[pet] 已启动：可把素材文件拖到角色上，或右键打开菜单");

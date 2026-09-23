@@ -19,6 +19,8 @@ add_executable(Pic2Pet
     PetMotion.cpp
     KeyBubble.h
     KeyBubble.cpp
+    SettingsWindow.h
+    SettingsWindow.cpp
     AutoStart.h
     AutoStart.cpp
     app.rc          # Windows resources: RT_MANIFEST (app.manifest) + exe icon (app.ico)
@@ -31,6 +33,7 @@ target_link_libraries(Pic2Pet
         Pic2Pet::render
         Pic2Pet::media
         Pic2Pet::input
+        Pic2Pet::ui
         Qt6::Core
         Qt6::Gui
         Qt6::Widgets

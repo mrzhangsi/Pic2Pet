@@ -15,6 +15,7 @@ enum class Icon {
     Motion,       // 动态效果：波形
     Appearance,   // 外观：明暗
     General,      // 通用：齿轮
+    Teacher,      // AI 教官：学士帽
 };
 
 /**

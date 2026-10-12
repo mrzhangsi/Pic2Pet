@@ -66,7 +66,7 @@ int main(int argc, char** argv) {
 
     QCommandLineOption settingsOption(
         QStringLiteral("settings"),
-        QStringLiteral("启动后直接打开设置窗口，可带页号 0~5（开发 / 截图验证用）"),
+        QStringLiteral("启动后直接打开设置窗口，可带页号 0~6（开发 / 截图验证用）"),
         QStringLiteral("page"), QStringLiteral("0"));
     parser.addOption(settingsOption);
 
@@ -75,6 +75,11 @@ int main(int argc, char** argv) {
         QStringLiteral("渲染一帧后保存为 PNG 并退出（用于自动化验证渲染路径）"),
         QStringLiteral("path"));
     parser.addOption(grabOption);
+
+    QCommandLineOption teacherOption(
+        QStringLiteral("teacher"),
+        QStringLiteral("启动后直接开启 AI 教官监控（用当前保存的配置，默认目标「学习」）"));
+    parser.addOption(teacherOption);
 
     parser.process(app);
 
@@ -119,6 +124,10 @@ int main(int argc, char** argv) {
         bool pageOk = false;
         const int page = parser.value(settingsOption).toInt(&pageOk);
         controller.openSettings(pageOk ? page : 0);
+    }
+
+    if (parser.isSet(teacherOption)) {
+        controller.startTeacher();
     }
 
     qInfo().noquote() << QStringLiteral("[pet] 已启动：可把素材文件拖到角色上，或右键打开菜单");

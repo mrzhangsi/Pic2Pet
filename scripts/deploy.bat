@@ -45,22 +45,23 @@ rem ---- prune: 46.8MB -> 29.1MB ----
 rem Only desktop OpenGL is used. The files below are pulled in by plugin dependency
 rem chains and verified safe to delete:
 rem   dxcompiler/dxil        shader compiler for Qt's D3D11 RHI (~15MB, the biggest chunk)
-rem   Qt6Network/Svg         pulled in by qtuiotouchplugin / qsvgicon
-rem   networkinformation/tls same chain
+rem   Qt6Svg                 pulled in by qtuiotouchplugin / qsvgicon
+rem   networkinformation     same chain (app uses QNetworkAccessManager directly)
+rem KEEP Qt6Network.dll + tls\qschannelbackend.dll: the AI Teacher feature calls the
+rem vision model over HTTPS via QNetworkAccessManager, and Qt falls back to the
+rem native Schannel TLS backend when no OpenSSL DLLs are present (verified on
+rem 2026-10-12), so these two cost ~1.6MB and add zero third-party dependencies.
 del /q "%DIST%\dxcompiler.dll" 2>nul
 del /q "%DIST%\dxil.dll" 2>nul
-del /q "%DIST%\Qt6Network.dll" 2>nul
 del /q "%DIST%\Qt6Svg.dll" 2>nul
 del /q "%DIST%\generic\qtuiotouchplugin.dll" 2>nul
 del /q "%DIST%\iconengines\qsvgicon.dll" 2>nul
 del /q "%DIST%\imageformats\qsvg.dll" 2>nul
 del /q "%DIST%\networkinformation\qnetworklistmanager.dll" 2>nul
 del /q "%DIST%\tls\qcertonlybackend.dll" 2>nul
-del /q "%DIST%\tls\qschannelbackend.dll" 2>nul
 if exist "%DIST%\generic" rmdir /s /q "%DIST%\generic"
 if exist "%DIST%\iconengines" rmdir /s /q "%DIST%\iconengines"
 if exist "%DIST%\networkinformation" rmdir /s /q "%DIST%\networkinformation"
-if exist "%DIST%\tls" rmdir /s /q "%DIST%\tls"
 
 echo [4/4] done
 echo       output: %DIST%\Pic2Pet.exe (copy the whole folder, ~29MB)

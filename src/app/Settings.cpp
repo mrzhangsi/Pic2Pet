@@ -59,6 +59,8 @@ void Settings::load() {
     if (data.motionLevel < 0) data.motionLevel = 0;
     if (data.motionLevel > 3) data.motionLevel = 3;
 
+    data.teacher.load(s);
+
     const int x = s.value(QStringLiteral("window/x"), -1).toInt();
     const int y = s.value(QStringLiteral("window/y"), -1).toInt();
     if (x >= 0 && y >= 0) data.pos = QPoint(x, y);
@@ -88,6 +90,8 @@ void Settings::save() {
     s.setValue(QStringLiteral("input/mode"), data.inputMode);
     s.setValue(QStringLiteral("input/keyBubble"), data.keyBubble);
     s.setValue(QStringLiteral("motion/level"), data.motionLevel);
+
+    data.teacher.save(s);
 
     s.setValue(QStringLiteral("window/x"), data.pos.x());
     s.setValue(QStringLiteral("window/y"), data.pos.y());

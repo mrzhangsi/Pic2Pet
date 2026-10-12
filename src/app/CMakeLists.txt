@@ -32,9 +32,11 @@ target_link_libraries(Pic2Pet
         Pic2Pet::media
         Pic2Pet::input
         Pic2Pet::ui
+        Pic2Pet::teacher
         Qt6::Core
         Qt6::Gui
         Qt6::Widgets
+        Qt6::Network
 )
 
 set_target_properties(Pic2Pet PROPERTIES MACOSX_BUNDLE OFF)

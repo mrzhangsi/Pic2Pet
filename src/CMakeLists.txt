@@ -12,6 +12,9 @@ add_subdirectory(input)
 # M3：设计系统与可复用控件（浅色苹果风）。只依赖 Qt，不认识业务；设置窗口在 app/
 add_subdirectory(ui)
 
+# AI 教官：学习状态监控（L0 本地规则 + L1 视觉模型 + L2 状态机）。见 teacher/README.md
+add_subdirectory(teacher)
+
 # 后续里程碑接入，目录已建好（见各目录 README.md）
 # add_subdirectory(psd)        # M2  PSD 只读解析 + rigger 装配 + .petbin
 # add_subdirectory(rig)        # M2  RigParams / deform / 弹簧物理 / 表情 / 动作

@@ -12,6 +12,7 @@
 #include "PerfProbe.h"
 #include "PetMotion.h"
 #include "Settings.h"
+#include "TeacherMonitor.h"
 
 class QMenu;
 class QSystemTrayIcon;
@@ -23,6 +24,7 @@ class KeyBubble;
 class KeyboardMonitor;
 class PetWindow;
 class SettingsWindow;
+class TeacherReport;
 
 /**
  * 装配中心：把窗口、渲染、素材播放、穿透调度、配置与性能采样串起来。
@@ -60,6 +62,15 @@ public:
     void openActionSettings();
 
     /**
+     * AI 教官（学习状态监控）：右键「AI 教官（学习）」一键启动，用当前保存的配置
+     * （默认 = 目标「学习」+ DeepSeek + 60~300s 自适应间隔）。设置窗口第 7 页
+     * 可详细配置后启动。监控跑在自己的线程里，见 src/teacher/README.md。
+     */
+    void startTeacher();
+    void stopTeacher();
+    bool teacherRunning() const { return teacher_ != nullptr; }
+
+    /**
      * 开关"输入模式"：全局监听键盘，敲键时触发「输入」动作。
      * 这是挂钩式能力，**默认关闭**（settings_.data.inputMode 初始为 false）。
      */
@@ -90,6 +101,13 @@ private slots:
     void onKeyEvent(quint32 vk, bool down);
     /** 动态通道的每帧推进 */
     void onMotionTick();
+    /** AI 教官：工作线程广播来的状态 / 告警 / 会话结束 */
+    void onTeacherStatus(const TeacherStatus& status);
+    void onTeacherAlert(const QString& reason, const QString& goal);
+    void onTeacherStarted(const QString& goal, bool hasApiKey, bool pomodoro);
+    void onTeacherFinished(const TeacherReport& report);
+    void onTeacherBreak(const QString& message);
+    void onTeacherFocus(const QString& message);
     void onContextMenu(const QPoint& globalPos);
     void onFileDropped(const QString& path);
     void onWheelZoomed(int steps);
@@ -168,6 +186,10 @@ private:
 
     QElapsedTimer animClock_;
     mutable PerfProbe probe_;
+
+    // ---- AI 教官（不启用时完全不创建，无截屏 / 无摄像头 / 无网络）----
+    TeacherMonitor* teacher_ = nullptr;
+    TeacherStatus lastTeacherStatus_;   // 供设置页回灌的最近一次状态
 
     FrameSequence seq_;             // 当前正在播放的动作序列（= actions_ 里当前动作的 seq）
     ActionSet actions_;             // 待机 / 单击 / 双击 / 拖拽

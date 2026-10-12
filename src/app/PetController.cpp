@@ -7,6 +7,7 @@
 #include "PetRenderer.h"
 #include "PetWindow.h"
 #include "SettingsWindow.h"
+#include "TeacherStats.h"
 #include "Theme.h"
 
 #include <QAction>
@@ -130,7 +131,16 @@ PetController::PetController(ClickThroughBackend backend, int size, bool useTray
 }
 
 PetController::~PetController() {
-    delete keyBubble_;      // 顶层窗口没有 QObject 父对象，得自己收
+    delete keyBubble_;      // 顶层小窗口没有 QObject 父对象，得自己收
+    if (teacher_) {
+        // 进程要退了：先礼貌停止（最多等一个 HTTP 超时），等不起再强杀
+        teacher_->stop();
+        if (!teacher_->wait(5000)) {
+            teacher_->terminate();
+            teacher_->wait(1000);
+        }
+        delete teacher_;
+    }
 }
 
 void PetController::start(const QString& cliMedia) {
@@ -725,6 +735,8 @@ void PetController::refreshSettingsWindow() {
     settingsWindow_->refresh();
     settingsWindow_->setAutoStartState(AutoStart::supported(), AutoStart::isEnabled());
     settingsWindow_->setPausedState(paused_);
+    settingsWindow_->setTeacherRunning(teacher_ != nullptr);
+    if (teacher_) settingsWindow_->setTeacherStatus(lastTeacherStatus_);
 }
 
 void PetController::applyAppearance(int scalePercent, int opacityPercent, bool alwaysOnTop,
@@ -828,6 +840,42 @@ void PetController::openSettings(int page) {
             resetPlacement();
             refreshSettingsWindow();
         });
+        // ---- AI 教官页：只发意图，落盘 / 启停都在这里做 ----
+        connect(settingsWindow_, &SettingsWindow::teacherGoalEdited, this,
+                [this](const QString& goal) {
+                    if (goal.isEmpty()) return;
+                    settings_.data.teacher.goal = goal;
+                    settings_.save();
+                    if (teacher_) teacher_->setGoal(goal);   // 运行中即时生效
+                    refreshSettingsWindow();
+                });
+        connect(settingsWindow_, &SettingsWindow::teacherProviderEdited, this,
+                [this](const QString& baseUrl, const QString& model, const QString& key) {
+                    if (!baseUrl.isEmpty()) settings_.data.teacher.api.baseUrl = baseUrl;
+                    if (!model.isEmpty()) settings_.data.teacher.api.model = model;
+                    if (!key.isEmpty()) settings_.data.teacher.api.apiKey = key;
+                    settings_.save();
+                    refreshSettingsWindow();
+                });
+        connect(settingsWindow_, &SettingsWindow::teacherCaptureChanged, this,
+                [this](bool monitorCamera, bool uploadCamera) {
+                    settings_.data.teacher.monitorCamera = monitorCamera;
+                    settings_.data.teacher.uploadCamera = uploadCamera;
+                    settings_.save();
+                    refreshSettingsWindow();
+                });
+        connect(settingsWindow_, &SettingsWindow::teacherPomodoroChanged, this,
+                [this](bool enabled, int focusMinutes, int breakMinutes) {
+                    settings_.data.teacher.pomodoro.enabled = enabled;
+                    settings_.data.teacher.pomodoro.focusMinutes = focusMinutes;
+                    settings_.data.teacher.pomodoro.breakMinutes = breakMinutes;
+                    settings_.save();
+                    refreshSettingsWindow();
+                });
+        connect(settingsWindow_, &SettingsWindow::teacherStartRequested, this,
+                [this] { startTeacher(); });
+        connect(settingsWindow_, &SettingsWindow::teacherStopRequested, this,
+                [this] { stopTeacher(); });
     }
 
     refreshSettingsWindow();
@@ -864,6 +912,113 @@ void PetController::setInputMode(bool on) {
     }
 
     settings_.save();
+}
+
+// ---------------------------------------------------------------- AI 教官
+
+namespace {
+
+/** 告警提示音：三声短促的 880Hz（对齐参考实现的 winsound.Beep） */
+void teacherAlertBeep() {
+#ifdef Q_OS_WIN
+    Beep(880, 180);
+    Beep(880, 180);
+    Beep(880, 180);
+#else
+    QApplication::beep();
+#endif
+}
+
+/** 弹托盘通知。没有托盘就退回日志（通知发不出去不该影响主流程） */
+void teacherNotify(QSystemTrayIcon* tray, const QString& title, const QString& message) {
+    if (tray) {
+        tray->showMessage(title, message, QSystemTrayIcon::Warning, 8000);
+    } else {
+        qInfo().noquote() << QStringLiteral("[teacher][通知] %1 | %2").arg(title, message);
+    }
+}
+
+} // namespace
+
+void PetController::startTeacher() {
+    if (teacher_) {
+        // 上一个还在收尾（停止要等线程退出）。这时候别再起一个，
+        // 否则会有两个监控同时截屏 / 开摄像头。
+        qInfo().noquote() << QStringLiteral("[teacher] 正在停止中，稍候再启动");
+        return;
+    }
+
+    teacher_ = new TeacherMonitor(settings_.data.teacher, nullptr);
+    // 监控跑在自己的线程；这些连接自动成为 queued，槽函数仍在主线程执行
+    connect(teacher_, &TeacherMonitor::started, this, &PetController::onTeacherStarted);
+    connect(teacher_, &TeacherMonitor::statusChanged, this, &PetController::onTeacherStatus);
+    connect(teacher_, &TeacherMonitor::alert, this, &PetController::onTeacherAlert);
+    connect(teacher_, &TeacherMonitor::pomodoroBreak, this, &PetController::onTeacherBreak);
+    connect(teacher_, &TeacherMonitor::pomodoroFocus, this, &PetController::onTeacherFocus);
+    connect(teacher_, &TeacherMonitor::finished, this, &PetController::onTeacherFinished);
+
+    teacher_->start();
+    qInfo().noquote() << QStringLiteral("[teacher] 启动：目标=%1").arg(settings_.data.teacher.goal);
+}
+
+void PetController::stopTeacher() {
+    if (!teacher_) return;
+    teacher_->stop();
+    // 界面立刻反映"已停止"，线程在后台收尾（最多一个 HTTP 超时），
+    // finished 信号到达时才真正删除对象。
+    if (settingsWindow_) settingsWindow_->setTeacherRunning(false);
+    if (tray_) tray_->setToolTip(QStringLiteral("Pic2Pet"));
+}
+
+void PetController::onTeacherStarted(const QString& goal, bool hasApiKey, bool pomodoro) {
+    if (settingsWindow_) settingsWindow_->setTeacherRunning(true);
+    if (tray_) {
+        tray_->setToolTip(QStringLiteral("Pic2Pet · AI 教官：%1").arg(goal));
+    }
+    qInfo().noquote() << QStringLiteral("[teacher] 已启动 | 目标=%1 | api=%2 | 课堂模式=%3")
+                             .arg(goal, hasApiKey ? QStringLiteral("有") : QStringLiteral("无"),
+                                  pomodoro ? QStringLiteral("开") : QStringLiteral("关"));
+}
+
+void PetController::onTeacherStatus(const TeacherStatus& status) {
+    lastTeacherStatus_ = status;
+    if (settingsWindow_) settingsWindow_->setTeacherStatus(status);
+}
+
+void PetController::onTeacherAlert(const QString& reason, const QString& goal) {
+    teacherNotify(tray_, QStringLiteral("⚠️ 疑似离开学习"),
+                  QStringLiteral("已连续未在学习：%1\n目标：%2").arg(reason, goal));
+    teacherAlertBeep();
+}
+
+void PetController::onTeacherBreak(const QString& message) {
+    teacherNotify(tray_, QStringLiteral("该休息一下了"), message);
+    teacherAlertBeep();
+}
+
+void PetController::onTeacherFocus(const QString& message) {
+    teacherNotify(tray_, QStringLiteral("休息结束"), message);
+    teacherAlertBeep();
+}
+
+void PetController::onTeacherFinished(const TeacherReport& report) {
+    // 完整报告进日志（不弹窗：桌宠不该在用户桌上乱弹东西）
+    qInfo().noquote() << QStringLiteral("[teacher] ── 会话报告 · %1 ──").arg(report.goal);
+    for (const auto& row : teacherFormatReport(report.stats)) {
+        if (row.second.isEmpty()) {
+            qInfo().noquote() << row.first;
+        } else {
+            qInfo().noquote() << QStringLiteral("  %1  %2").arg(row.first, row.second);
+        }
+    }
+
+    lastTeacherStatus_ = TeacherStatus{};
+    if (teacher_) {
+        teacher_->deleteLater();
+        teacher_ = nullptr;
+    }
+    if (settingsWindow_) settingsWindow_->setTeacherRunning(false);
+    if (tray_) tray_->setToolTip(QStringLiteral("Pic2Pet"));
 }
 
 void PetController::onKeyEvent(quint32 vk, bool down) {
@@ -1105,6 +1260,23 @@ void PetController::rebuildMenu(QMenu* menu) {
             if (!ok) qWarning() << "[pet] 开机自启设置失败";
         });
     }
+
+    // AI 教官：右键一键启动（默认配置 = 目标「学习」）；运行中再点一次 = 停止
+    auto* teacherAction = menu->addAction(QStringLiteral("AI 教官（学习）"));
+    teacherAction->setCheckable(true);
+    teacherAction->setChecked(teacher_ != nullptr);
+    teacherAction->setToolTip(QStringLiteral(
+        "定期看你在做什么，分心了弹托盘通知 + 提示音。\n"
+        "启动用当前保存的配置（默认：目标「学习」+ DeepSeek，间隔 60~300s 自适应）。\n"
+        "只在启动后定时截屏 / 拍照，图片不落盘；停止后完全静默。"));
+    connect(teacherAction, &QAction::toggled, this, [this](bool on) {
+        if (on) {
+            startTeacher();
+        } else {
+            stopTeacher();
+        }
+    });
+    menu->addAction(QStringLiteral("AI 教官设置…"), this, [this] { openSettings(6); });
 
     auto* topAction = menu->addAction(QStringLiteral("始终置顶"));
     topAction->setCheckable(true);

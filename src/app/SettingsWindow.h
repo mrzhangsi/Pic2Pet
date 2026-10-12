@@ -6,9 +6,12 @@
 #include "ActionSet.h"   // PetAction
 #include "Icons.h"
 #include "Settings.h"
+#include "TeacherMonitor.h"   // TeacherStatus
 
 class QLabel;
+class QLineEdit;
 class QPushButton;
+class QScrollArea;
 class QSlider;
 class QSpinBox;
 class QStackedWidget;
@@ -41,7 +44,11 @@ public:
     /** 暂停是控制器的运行态，也不在 Settings 里 */
     void setPausedState(bool paused);
 
-    /** 切到某一页（0 素材 / 1 动作 / 2 输入 / 3 动态效果 / 4 外观 / 5 通用） */
+    /** AI 教官：控制器喂进来的运行态与实时状态（跨线程信号到达后调用） */
+    void setTeacherRunning(bool running);
+    void setTeacherStatus(const TeacherStatus& status);
+
+    /** 切到某一页（0 素材 / 1 动作 / 2 输入 / 3 动态效果 / 4 外观 / 5 通用 / 6 AI 教官） */
     void showPage(int index);
 
 signals:
@@ -50,6 +57,16 @@ signals:
     void motionLevelChanged(int level);
     void chooseMediaRequested();
     void recentMediaChosen(const QString& path);
+
+    // ---- AI 教官页：只发意图，落盘与启停都由控制器做 ----
+    /** 目标改了（运行中也生效：下一次判定就用新目标） */
+    void teacherGoalEdited(const QString& goal);
+    /** 模型服务改了。key 为空 = 不动原来的 key（不会把空值写回去） */
+    void teacherProviderEdited(const QString& baseUrl, const QString& model, const QString& key);
+    void teacherCaptureChanged(bool monitorCamera, bool uploadCamera);
+    void teacherPomodoroChanged(bool enabled, int focusMinutes, int breakMinutes);
+    void teacherStartRequested();
+    void teacherStopRequested();
 
     // ---- 动作页：逐项改动 ----
     void actionMediaChosen(PetAction action, const QString& path);
@@ -87,6 +104,10 @@ private:
     QWidget* buildMotionPage();
     QWidget* buildAppearancePage();
     QWidget* buildGeneralPage();
+    /** AI 教官页。内容比一屏高，放进 QScrollArea（参考实现同样栽过这个跟头） */
+    QScrollArea* buildTeacherPage();
+    void refreshTeacher();
+    void updateTeacherStatusUi();
     void buildSidebar(QWidget* sidebar);
     void refreshMedia();
     void refreshRecent();
@@ -112,6 +133,26 @@ private:
 
     ToggleSwitch* autoStartToggle_ = nullptr;
     QLabel* configPathLabel_ = nullptr;
+
+    // ---- AI 教官页 ----
+    QLabel* teacherStateLabel_ = nullptr;      // 大状态字（学习中 / 分心 / …）
+    QLabel* teacherStatsLabel_ = nullptr;      // 已运行 · 采样 · 告警
+    QLabel* teacherCostLabel_ = nullptr;       // token 与预估花费
+    QPushButton* teacherStartBtn_ = nullptr;
+    QPushButton* teacherStopBtn_ = nullptr;
+    QLineEdit* teacherGoalEdit_ = nullptr;
+    QLineEdit* teacherUrlEdit_ = nullptr;
+    QLineEdit* teacherModelEdit_ = nullptr;
+    QLineEdit* teacherKeyEdit_ = nullptr;
+    ToggleSwitch* teacherCameraToggle_ = nullptr;
+    ToggleSwitch* teacherUploadToggle_ = nullptr;
+    ToggleSwitch* teacherPomodoroToggle_ = nullptr;
+    QSpinBox* teacherFocusSpin_ = nullptr;
+    QSpinBox* teacherBreakSpin_ = nullptr;
+    /** 控制器喂进来的最近一次状态快照（refresh 时回灌） */
+    TeacherStatus teacherStatus_;
+    bool teacherRunning_ = false;
+    bool teacherHasReport_ = false;   // 是否收到过结束报告（决定状态卡显示什么）
 
     QHash<int, ActionRow> actionRows_;   // key = int(PetAction)
 

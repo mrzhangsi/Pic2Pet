@@ -4,6 +4,8 @@
 #include <QString>
 #include <QStringList>
 
+#include "TeacherConfig.h"
+
 namespace pic2pet {
 
 /**
@@ -61,6 +63,13 @@ struct PetSettingsData {
      * 注意：≥2 会开着"呼吸"，也就是**一直在动**，静态素材的 CPU 会从 ~0 变成持续重绘。
      */
     int motionLevel = 2;
+
+    /**
+     * AI 教官（学习状态监控）配置。默认 = 目标「学习」+ DeepSeek + 60~300s 自适应
+     * 间隔 + 课堂模式关，右键「AI 教官」一键启动用的就是它。见 src/teacher/README.md。
+     * API key 也只存这个本地 INI，不写日志、不进报告。
+     */
+    TeacherConfig teacher;
 };
 
 /**

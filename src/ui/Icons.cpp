@@ -98,6 +98,32 @@ void paintGeneral(QPainter& p, const QPen& pen, const QColor& c) {
     }
 }
 
+void paintTeacher(QPainter& p, const QPen& pen, const QColor& c) {
+    // 学士帽：帽板（菱形）+ 帽冠（拱形）+ 流苏
+    p.setPen(pen);
+    p.setBrush(Qt::NoBrush);
+    QPainterPath board;                                            // 帽板
+    board.moveTo(1.8, 6.2);
+    board.lineTo(8.0, 3.6);
+    board.lineTo(14.2, 6.2);
+    board.lineTo(8.0, 8.8);
+    board.closeSubpath();
+    p.drawPath(board);
+
+    QPainterPath crown;                                            // 帽冠
+    crown.moveTo(5.0, 6.6);
+    crown.quadTo(5.0, 11.4, 8.0, 11.4);
+    crown.quadTo(11.0, 11.4, 11.0, 6.6);
+    p.drawPath(crown);
+
+    p.setPen(Qt::NoPen);                                           // 流苏
+    p.setBrush(c);
+    p.drawEllipse(QPointF(13.6, 6.4), 0.9, 0.9);
+    p.setBrush(Qt::NoBrush);
+    p.setPen(pen);
+    p.drawLine(QPointF(13.6, 6.4), QPointF(13.6, 10.2));
+}
+
 } // namespace
 
 void paintIcon(QPainter& p, Icon icon, const QRectF& box, const QColor& color,
@@ -125,6 +151,7 @@ void paintIcon(QPainter& p, Icon icon, const QRectF& box, const QColor& color,
     case Icon::Motion:     paintMotion(p, pen, color); break;
     case Icon::Appearance: paintAppearance(p, pen, color); break;
     case Icon::General:    paintGeneral(p, pen, color); break;
+    case Icon::Teacher:    paintTeacher(p, pen, color); break;
     }
     p.restore();
 }

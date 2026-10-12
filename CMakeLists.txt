@@ -22,7 +22,9 @@ endif()
 option(PIC2PET_CONSOLE "以控制台子系统构建（开发调试用，会多一个黑框）" OFF)
 
 # M0 spike 只需要 Qt 核心 + Widgets + OpenGL，不依赖任何第三方库。
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets OpenGL OpenGLWidgets)
+# Network：AI 教官调视觉模型用（HTTPS 在无 OpenSSL DLL 时自动走系统 Schannel，
+# 不增加发布体积；tls 插件要留着，别在 deploy 里删）。
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets OpenGL OpenGLWidgets Network)
 
 message(STATUS "Pic2Pet: Qt ${Qt6_VERSION} found at ${Qt6_DIR}")
 message(STATUS "Pic2Pet: platform=${CMAKE_SYSTEM_NAME} compiler=${CMAKE_CXX_COMPILER_ID}")

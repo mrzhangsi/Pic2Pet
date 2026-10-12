@@ -2,6 +2,7 @@
 
 #include "SegmentedControl.h"
 #include "SidebarItem.h"
+#include "TeacherStats.h"
 #include "Theme.h"
 #include "ToggleSwitch.h"
 
@@ -16,8 +17,10 @@
 #include <QIcon>
 #include <QImageReader>
 #include <QLabel>
+#include <QLineEdit>
 #include <QPixmap>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QSignalBlocker>
 #include <QSlider>
 #include <QSpinBox>
@@ -45,6 +48,7 @@ const QColor kNavColors[] = {
     QColor(0xFF, 0x9F, 0x0A),   // 动态效果
     QColor(0x5A, 0xC8, 0xFA),   // 外观
     QColor(0x8E, 0x8E, 0x93),   // 通用
+    QColor(0xFF, 0x3B, 0x30),   // AI 教官（告警红）
 };
 
 const PetAction kAllActions[] = { PetAction::Idle, PetAction::Click, PetAction::DoubleClick,
@@ -213,6 +217,7 @@ SettingsWindow::SettingsWindow(Settings* settings, QWidget* parent)
     stack_->addWidget(buildMotionPage());
     stack_->addWidget(buildAppearancePage());
     stack_->addWidget(buildGeneralPage());
+    stack_->addWidget(buildTeacherPage());
 
     appearanceCoalesce_ = new QTimer(this);
     appearanceCoalesce_->setSingleShot(true);
@@ -261,6 +266,7 @@ void SettingsWindow::buildSidebar(QWidget* sidebar) {
         { theme::Icon::Motion, QStringLiteral("动态效果") },
         { theme::Icon::Appearance, QStringLiteral("外观") },
         { theme::Icon::General, QStringLiteral("通用") },
+        { theme::Icon::Teacher, QStringLiteral("AI 教官") },
     };
 
     for (int i = 0; i < int(sizeof(kNav) / sizeof(kNav[0])); ++i) {
@@ -693,6 +699,316 @@ QWidget* SettingsWindow::buildGeneralPage() {
     return page;
 }
 
+QScrollArea* SettingsWindow::buildTeacherPage() {
+    auto* page = newPage(QStringLiteral("AI 教官"),
+                         QStringLiteral("定期看你在做什么，分心了提醒你。右键菜单「AI 教官」"
+                                        "可用默认配置一键启动；本页除「目标」外，改动都在下次"
+                                        "启动时生效。"));
+
+    // ---- 状态卡 ----
+    auto* status = card();
+
+    auto* stateRow = new QWidget;
+    auto* sh = new QHBoxLayout(stateRow);
+    sh->setContentsMargins(16, 14, 16, 14);
+    sh->setSpacing(12);
+    auto* stateText = new QVBoxLayout;
+    stateText->setSpacing(1);
+    teacherStateLabel_ = label(QStringLiteral("未启动"), QStringLiteral("teacherState"));
+    stateText->addWidget(teacherStateLabel_);
+    stateText->addWidget(label(QStringLiteral("学习中 / 分心 / 休息中"), QStringLiteral("rowSub")));
+    sh->addLayout(stateText, 1);
+
+    teacherStartBtn_ = primaryButton(QStringLiteral("启动"));
+    connect(teacherStartBtn_, &QPushButton::clicked, this,
+            [this] { emit teacherStartRequested(); });
+    sh->addWidget(teacherStartBtn_, 0, Qt::AlignVCenter);
+    auto* stopBtn = ghostButton(QStringLiteral("停止"));
+    connect(stopBtn, &QPushButton::clicked, this, [this] { emit teacherStopRequested(); });
+    sh->addWidget(stopBtn, 0, Qt::AlignVCenter);
+    teacherStopBtn_ = stopBtn;
+    qobject_cast<QVBoxLayout*>(status->layout())->addWidget(stateRow);
+    qobject_cast<QVBoxLayout*>(status->layout())->addWidget(separator());
+
+    teacherGoalEdit_ = new QLineEdit;
+    teacherGoalEdit_->setPlaceholderText(QStringLiteral("学习"));
+    teacherGoalEdit_->setMinimumWidth(220);
+    connect(teacherGoalEdit_, &QLineEdit::editingFinished, this, [this] {
+        if (!suppressSignals_) emit teacherGoalEdited(teacherGoalEdit_->text().trimmed());
+    });
+    addRow(status, QStringLiteral("学习目标"),
+           QStringLiteral("告诉模型「什么才算在学」。运行中也可以改，下一次判定生效。"),
+           teacherGoalEdit_);
+
+    teacherStatsLabel_ = label(QStringLiteral("—"), QStringLiteral("rowSub"));
+    teacherStatsLabel_->setWordWrap(true);
+    addRow(status, QStringLiteral("本次会话"), QStringLiteral("已运行 · 采样 · 告警"),
+           teacherStatsLabel_);
+
+    teacherCostLabel_ = label(QStringLiteral("—"), QStringLiteral("rowSub"));
+    addRow(status, QStringLiteral("模型花费"),
+           QStringLiteral("按 DeepSeek 价目估算，高峰时段贵一倍"), teacherCostLabel_, true);
+
+    // ---- 模型服务卡 ----
+    auto* api = card();
+    teacherUrlEdit_ = new QLineEdit;
+    teacherUrlEdit_->setPlaceholderText(QStringLiteral("https://api.deepseek.com"));
+    teacherUrlEdit_->setMinimumWidth(220);
+    connect(teacherUrlEdit_, &QLineEdit::editingFinished, this, [this] {
+        if (!suppressSignals_) {
+            emit teacherProviderEdited(teacherUrlEdit_->text().trimmed(),
+                                       teacherModelEdit_->text().trimmed(), QString());
+        }
+    });
+    addRow(api, QStringLiteral("接口地址"), QStringLiteral("任何 OpenAI 兼容端点"),
+           teacherUrlEdit_);
+
+    teacherModelEdit_ = new QLineEdit;
+    teacherModelEdit_->setPlaceholderText(QStringLiteral("deepseek-flash"));
+    teacherModelEdit_->setMinimumWidth(220);
+    connect(teacherModelEdit_, &QLineEdit::editingFinished, this, [this] {
+        if (!suppressSignals_) {
+            emit teacherProviderEdited(QString(), teacherModelEdit_->text().trimmed(), QString());
+        }
+    });
+    addRow(api, QStringLiteral("模型"), QStringLiteral("需要原生支持图像输入"),
+           teacherModelEdit_);
+
+    teacherKeyEdit_ = new QLineEdit;
+    teacherKeyEdit_->setEchoMode(QLineEdit::Password);
+    teacherKeyEdit_->setMinimumWidth(220);
+    teacherKeyEdit_->setToolTip(QStringLiteral("只写入本机配置文件，不写日志、不进报告。\n"
+                                              "留空 = 保持原来的 key 不变。"));
+    connect(teacherKeyEdit_, &QLineEdit::editingFinished, this, [this] {
+        if (!suppressSignals_) {
+            emit teacherProviderEdited(QString(), QString(), teacherKeyEdit_->text());
+        }
+    });
+    addRow(api, QStringLiteral("API Key"),
+           QStringLiteral("没配 key 也能跑：只走本地规则（锁屏 / 人离开）"),
+           teacherKeyEdit_, true);
+
+    // ---- 采集卡 ----
+    auto* cap = card();
+    teacherCameraToggle_ = new ToggleSwitch;
+    connect(teacherCameraToggle_, &QAbstractButton::toggled, this, [this](bool) {
+        if (!suppressSignals_) {
+            emit teacherCaptureChanged(teacherCameraToggle_->isChecked(),
+                                       teacherUploadToggle_->isChecked());
+        }
+    });
+    addRow(cap, QStringLiteral("摄像头"),
+           QStringLiteral("判断「人在不在、姿态像不像在学习」。只用系统 Media Foundation，"
+                          "不装任何驱动"), teacherCameraToggle_);
+
+    teacherUploadToggle_ = new ToggleSwitch;
+    connect(teacherUploadToggle_, &QAbstractButton::toggled, this, [this](bool) {
+        if (!suppressSignals_) {
+            emit teacherCaptureChanged(teacherCameraToggle_->isChecked(),
+                                       teacherUploadToggle_->isChecked());
+        }
+    });
+    addRow(cap, QStringLiteral("上传摄像头画面"),
+           QStringLiteral("关掉后摄像头只用于本地检测，模型只能看到屏幕"),
+           teacherUploadToggle_, true);
+
+    // ---- 课堂模式卡 ----
+    auto* pom = card();
+    teacherPomodoroToggle_ = new ToggleSwitch;
+    connect(teacherPomodoroToggle_, &QAbstractButton::toggled, this, [this](bool) {
+        if (!suppressSignals_) {
+            emit teacherPomodoroChanged(teacherPomodoroToggle_->isChecked(),
+                                        teacherFocusSpin_->value(),
+                                        teacherBreakSpin_->value());
+        }
+    });
+    addRow(pom, QStringLiteral("课堂模式（番茄钟）"),
+           QStringLiteral("专注一段时间后提醒休息，休息期间完全不抓拍"),
+           teacherPomodoroToggle_);
+
+    auto* focusRow = new QWidget;
+    auto* fh = new QHBoxLayout(focusRow);
+    fh->setContentsMargins(0, 0, 0, 0);
+    fh->setSpacing(8);
+    teacherFocusSpin_ = new QSpinBox;
+    teacherFocusSpin_->setRange(1, 180);
+    teacherFocusSpin_->setSuffix(QStringLiteral(" 分钟"));
+    teacherFocusSpin_->setFixedWidth(90);
+    teacherFocusSpin_->setAlignment(Qt::AlignCenter);
+    teacherFocusSpin_->setButtonSymbols(QAbstractSpinBox::NoButtons);
+    connect(teacherFocusSpin_, &QSpinBox::valueChanged, this, [this](int) {
+        if (!suppressSignals_) {
+            emit teacherPomodoroChanged(teacherPomodoroToggle_->isChecked(),
+                                        teacherFocusSpin_->value(),
+                                        teacherBreakSpin_->value());
+        }
+    });
+    fh->addWidget(teacherFocusSpin_);
+    addRow(pom, QStringLiteral("专注时长"), QStringLiteral("到点提醒休息一下"), focusRow);
+
+    auto* breakRow = new QWidget;
+    auto* bh = new QHBoxLayout(breakRow);
+    bh->setContentsMargins(0, 0, 0, 0);
+    bh->setSpacing(8);
+    teacherBreakSpin_ = new QSpinBox;
+    teacherBreakSpin_->setRange(0, 60);
+    teacherBreakSpin_->setSuffix(QStringLiteral(" 分钟"));
+    teacherBreakSpin_->setFixedWidth(90);
+    teacherBreakSpin_->setAlignment(Qt::AlignCenter);
+    teacherBreakSpin_->setButtonSymbols(QAbstractSpinBox::NoButtons);
+    teacherBreakSpin_->setSpecialValueText(QStringLiteral("0（不休息）"));
+    connect(teacherBreakSpin_, &QSpinBox::valueChanged, this, [this](int) {
+        if (!suppressSignals_) {
+            emit teacherPomodoroChanged(teacherPomodoroToggle_->isChecked(),
+                                        teacherFocusSpin_->value(),
+                                        teacherBreakSpin_->value());
+        }
+    });
+    bh->addWidget(teacherBreakSpin_);
+    addRow(pom, QStringLiteral("休息时长"), QStringLiteral("休息期间不截图、不开摄像头"),
+           breakRow, true);
+
+    auto* lay = pageLayout(page);
+    lay->addWidget(status);
+    lay->addSpacing(12);
+    lay->addWidget(api);
+    lay->addSpacing(12);
+    lay->addWidget(cap);
+    lay->addSpacing(12);
+    lay->addWidget(pom);
+    lay->addSpacing(12);
+    lay->addWidget(noteBox(QStringLiteral(
+        "隐私：只在启动后定时截屏 / 拍照，图片不落盘、不上传除模型外的任何地方，"
+        "日志只记字节数；不记录 API key。停止后本功能完全静默。\n"
+        "花费：单次判定约 ¥0.0003~0.0007。持续学习时采样间隔会自动拉长到 5 分钟，"
+        "学一天约 ¥0.04~0.09；「越不学习越费钱」是正常的——分心时需要密集采样来确认。")));
+    lay->addStretch(1);
+
+    // 内容比一屏高，套滚动区（参考实现的 GUI 同样栽过这个跟头）
+    auto* scroll = new QScrollArea;
+    scroll->setWidget(page);
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    return scroll;
+}
+
+void SettingsWindow::refreshTeacher() {
+    if (!teacherGoalEdit_) return;   // 页还没建
+    suppressSignals_ = true;
+
+    const TeacherConfig& t = settings_->data.teacher;
+    teacherGoalEdit_->setText(t.goal);
+    teacherUrlEdit_->setText(t.api.baseUrl);
+    teacherModelEdit_->setText(t.api.model);
+    // Key 不回显原文：有值就显示掩码，空着显示占位提示
+    teacherKeyEdit_->clear();
+    teacherKeyEdit_->setPlaceholderText(t.api.apiKey.isEmpty()
+                                            ? QStringLiteral("未配置：只走本地规则")
+                                            : QStringLiteral("已保存一个 Key（输入可替换）"));
+    teacherCameraToggle_->setChecked(t.monitorCamera);
+    teacherUploadToggle_->setChecked(t.monitorCamera && t.uploadCamera);
+    teacherPomodoroToggle_->setChecked(t.pomodoro.enabled);
+    teacherFocusSpin_->setValue(int(t.pomodoro.focusMinutes));
+    teacherBreakSpin_->setValue(int(t.pomodoro.breakMinutes));
+
+    suppressSignals_ = false;
+    updateTeacherStatusUi();
+}
+
+void SettingsWindow::setTeacherStatus(const TeacherStatus& status) {
+    teacherStatus_ = status;
+    updateTeacherStatusUi();
+}
+
+void SettingsWindow::setTeacherRunning(bool running) {
+    teacherRunning_ = running;
+    updateTeacherStatusUi();
+}
+
+void SettingsWindow::updateTeacherStatusUi() {
+    if (!teacherStateLabel_) return;
+
+    // 运行中锁定配置项（目标除外——它运行中可改）
+    const bool lockConfig = teacherRunning_;
+    teacherUrlEdit_->setEnabled(!lockConfig);
+    teacherModelEdit_->setEnabled(!lockConfig);
+    teacherKeyEdit_->setEnabled(!lockConfig);
+    teacherCameraToggle_->setEnabled(!lockConfig);
+    teacherUploadToggle_->setEnabled(!lockConfig && teacherCameraToggle_->isChecked());
+    teacherPomodoroToggle_->setEnabled(!lockConfig);
+    teacherFocusSpin_->setEnabled(!lockConfig);
+    teacherBreakSpin_->setEnabled(!lockConfig);
+
+    teacherStartBtn_->setVisible(!teacherRunning_);
+    teacherStopBtn_->setVisible(teacherRunning_);
+
+    const QString gray = QStringLiteral("#8E8E93");
+    const QString green = QStringLiteral("#34C759");
+    const QString red = QStringLiteral("#FF3B30");
+    const QString amber = QStringLiteral("#FF9F0A");
+
+    if (!teacherRunning_) {
+        teacherStateLabel_->setText(QStringLiteral("未启动"));
+        teacherStateLabel_->setStyleSheet(QStringLiteral("color:%1;").arg(gray));
+        teacherStatsLabel_->setText(QStringLiteral("—"));
+        teacherCostLabel_->setText(QStringLiteral("—"));
+        return;
+    }
+
+    QString stateText;
+    QString color = gray;
+    if (teacherStatus_.inBreak) {
+        stateText = QStringLiteral("休息中");
+        color = amber;
+    } else {
+        switch (teacherStatus_.state) {
+        case TeacherState::Focusing:
+            stateText = QStringLiteral("学习中");
+            color = green;
+            break;
+        case TeacherState::Distracted:
+            stateText = QStringLiteral("分心");
+            color = red;
+            break;
+        case TeacherState::Unsure:
+            stateText = QStringLiteral("不确定");
+            color = amber;
+            break;
+        }
+    }
+    if (!teacherStatus_.reason.isEmpty()) {
+        const QFontMetrics fm(teacherStateLabel_->font());
+        stateText += QStringLiteral("　%1")
+                         .arg(fm.elidedText(teacherStatus_.reason, Qt::ElideRight, 320));
+    }
+    teacherStateLabel_->setText(stateText);
+    teacherStateLabel_->setStyleSheet(QStringLiteral("color:%1;").arg(color));
+
+    const int secs = int(teacherStatus_.elapsedS);
+    const QString elapsed = QStringLiteral("%1:%2:%3")
+                                .arg(secs / 3600)
+                                .arg((secs % 3600) / 60, 2, 10, QLatin1Char('0'))
+                                .arg(secs % 60, 2, 10, QLatin1Char('0'));
+    teacherStatsLabel_->setText(
+        QStringLiteral("已运行 %1 · 采样 %2 次（本地 %3 / 模型 %4）· 告警 %5 次 · 下次 %6s")
+            .arg(elapsed)
+            .arg(teacherStatus_.screenshots)
+            .arg(teacherStatus_.localHits)
+            .arg(teacherStatus_.apiCalls + teacherStatus_.apiFailed + teacherStatus_.apiSkipped)
+            .arg(teacherStatus_.alerts)
+            .arg(int(teacherStatus_.nextIntervalS)));
+
+    const double cost = TeacherStats::estCostFor(teacherStatus_.promptTokens,
+                                                 teacherStatus_.completionTokens);
+    teacherCostLabel_->setText(
+        QStringLiteral("输入 %1 / 输出 %2 tokens · 预估 ¥%3（%4）")
+            .arg(teacherStatus_.promptTokens)
+            .arg(teacherStatus_.completionTokens)
+            .arg(cost, 0, 'f', 5)
+            .arg(TeacherStats::isPeakTime() ? QStringLiteral("高峰时段")
+                                            : QStringLiteral("空闲时段")));
+}
+
 void SettingsWindow::showPage(int index) {
     if (!stack_ || index < 0 || index >= stack_->count()) return;
     stack_->setCurrentIndex(index);
@@ -700,7 +1016,6 @@ void SettingsWindow::showPage(int index) {
     const auto items = findChildren<SidebarItem*>();
     for (int i = 0; i < items.size(); ++i) items.at(i)->setChecked(i == index);
 }
-
 void SettingsWindow::scheduleAppearanceEmit() {
     if (suppressSignals_) return;
     appearanceCoalesce_->start(kAppearanceCoalesceMs);
@@ -728,6 +1043,7 @@ void SettingsWindow::refresh() {
     refreshMedia();
     refreshRecent();
     refreshActions();
+    refreshTeacher();
 
     suppressSignals_ = false;
 }

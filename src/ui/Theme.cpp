@@ -28,6 +28,8 @@ QLabel#rowTitle      { font-size: 13px; }
 QLabel#rowSub        { color: #86868B; font-size: 12px; }
 QLabel#rowSubDim     { color: #C7C7CC; font-size: 12px; }
 QLabel#hint          { color: #86868B; font-size: 12px; }
+/* AI 教官页的大状态字（颜色由代码按 学习中/分心/不确定 动态设置） */
+QLabel#teacherState  { font-size: 22px; font-weight: 600; }
 
 QFrame#card { background: #F5F5F7; border-radius: 10px; }
 QFrame#sep  { background: #E5E5EA; max-height: 1px; border: none; }
@@ -83,6 +85,16 @@ QSpinBox:disabled {
 
 QScrollArea { background: transparent; border: none; }
 QScrollArea > QWidget > QWidget { background: transparent; }
+
+/* 输入框（AI 教官页的目标 / URL / Key）。同样必须补 :disabled */
+QLineEdit {
+    background: #FFFFFF; border: 1px solid #D2D2D7; border-radius: 6px;
+    padding: 4px 8px; font-size: 12px; selection-background-color: #007AFF;
+}
+QLineEdit:focus { border-color: #007AFF; }
+QLineEdit:disabled {
+    background: #F5F5F7; color: #C7C7CC; border-color: #E5E5EA;
+}
 
 QToolTip { background: #1D1D1F; color: #FFFFFF; border: none; padding: 4px 8px; font-size: 12px; }
 )");

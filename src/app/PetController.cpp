@@ -9,6 +9,7 @@
 #include "SettingsWindow.h"
 #include "TeacherStats.h"
 #include "Theme.h"
+#include "WebFilter.h"
 
 #include <QAction>
 #include <QActionGroup>
@@ -179,7 +180,19 @@ void PetController::start(const QString& cliMedia) {
     //   ① 正常退出已清除，这里按 enabled 重新写上（状态一致）
     //   ② 进程被异常杀死（任务管理器等），策略可能还挂着：apply() 幂等，
     //      发现注册表里已是目标状态就什么都不做
-    if (settings_.data.teacher.webFilter.enabled) applyWebFilter();
+    //
+    // **刻意不在这里弹 UAC**：开机就问一次管理员密码没人受得了。
+    // 策略还挂着（情况②）就直接是"限制生效中"，不需要重写；
+    // 真被清掉了（情况①）也等用户下次自己开开关时再写 —— 那时弹 UAC 才是合理的。
+    // 注意这里**不碰注册表**：读 HKLM 策略键不需要提权。
+    if (settings_.data.teacher.webFilter.enabled) {
+        const bool stillActive = WebFilter::isActive();
+        qInfo().noquote()
+            << QStringLiteral("[webfilter] 上次是开启的，注册表状态：%1")
+                   .arg(stillActive ? QStringLiteral("策略仍在（限制生效中）")
+                                    : QStringLiteral("已被清除（需手动重新开启）"));
+        if (settingsWindow_) refreshSettingsWindow();
+    }
 
     // 动态通道：按上次的强度起步（强度 0 时什么都不会起）
     applyMotionParams();
@@ -747,6 +760,8 @@ void PetController::refreshSettingsWindow() {
     settingsWindow_->setTeacherRunning(teacher_ != nullptr);
     if (teacher_) settingsWindow_->setTeacherStatus(lastTeacherStatus_);
     settingsWindow_->setWebFilterError(webFilterError_);
+    settingsWindow_->setWebFilterBusy(webFilterBusy_);   // refresh() 会重置开关 enabled，必须补回
+    settingsWindow_->setWebFilterPolicyActive(WebFilter::isActive());
 }
 
 void PetController::applyAppearance(int scalePercent, int opacityPercent, bool alwaysOnTop,
@@ -1029,27 +1044,69 @@ void PetController::applyWebFilter() {
         qInfo().noquote() << QStringLiteral("[webfilter] 当前平台不支持，仅 Windows 生效");
         return;
     }
-
-    if (webFilter_.apply(settings_.data.teacher.webFilter.entries)) {
-        webFilterError_.clear();
-        qInfo().noquote()
-            << QStringLiteral("[webfilter] 已开启：Edge 仅允许 %1 个白名单网站")
-                   .arg(settings_.data.teacher.webFilter.entries.size());
+    if (webFilterBusy_) {
+        qInfo().noquote() << QStringLiteral("[webfilter] 上一次操作还在进行，忽略重复请求");
         return;
     }
 
-    // 失败：把开关拨回去，绝不留「设置说开着、实际没拦」的两套状态
-    webFilterError_ = webFilter_.error();
-    settings_.data.teacher.webFilter.enabled = false;
-    settings_.save();
-    qWarning().noquote() << QStringLiteral("[webfilter] 开启失败：%1").arg(webFilterError_);
+    const QStringList entries = settings_.data.teacher.webFilter.entries;
+    webFilterBusy_ = true;
+    if (settingsWindow_) {
+        settingsWindow_->setWebFilterBusy(true);
+        settingsWindow_->setWebFilterError(QString());
+    }
+
+    // 提权要弹 UAC，可能十几秒 —— 必须异步，绝不卡住 GUI
+    WebFilterElevated::applyAsync(entries, [this, entries](bool ok, const QString& error) {
+        webFilterBusy_ = false;
+        if (ok) {
+            webFilterError_.clear();
+            qInfo().noquote()
+                << QStringLiteral("[webfilter] 已开启：Edge 仅允许 %1 个白名单网站"
+                                  "（机器级；Edge 需重启或等约 15 分钟生效）")
+                       .arg(entries.size());
+        } else {
+            // 失败：把开关拨回去，绝不留「设置说开着、实际没拦」的两套状态
+            webFilterError_ = error;
+            settings_.data.teacher.webFilter.enabled = false;
+            settings_.save();
+            qWarning().noquote() << QStringLiteral("[webfilter] 开启失败：%1").arg(error);
+            teacherNotify(tray_, QStringLiteral("网站白名单开启失败"), error);
+        }
+        if (settingsWindow_) {
+            settingsWindow_->setWebFilterBusy(false);
+            settingsWindow_->setWebFilterError(webFilterError_);
+            settingsWindow_->refresh();
+            settingsWindow_->setWebFilterPolicyActive(WebFilter::isActive());
+        }
+    });
 }
 
 void PetController::clearWebFilter() {
     if (!WebFilter::isSupported()) return;
-    webFilter_.clear();
-    webFilterError_.clear();
-    qInfo().noquote() << QStringLiteral("[webfilter] 已清除，Edge 恢复自由访问");
+    if (webFilterBusy_) return;
+
+    // 同步等待：这条路径只在"关闭白名单"与"退出 Pic2Pet"时走。
+    // 退出时已经没有事件循环了，必须等子进程真的把策略清掉再让主进程结束，
+    // 否则会留下一个"软件没了但 Edge 还在拦"的半截状态。
+    webFilterBusy_ = true;
+    QString error;
+    const bool ok = WebFilterElevated::clearBlocking(&error);
+    webFilterBusy_ = false;
+
+    if (ok) {
+        webFilterError_.clear();
+        qInfo().noquote() << QStringLiteral("[webfilter] 已清除，Edge 恢复自由访问");
+    } else {
+        webFilterError_ = error;
+        qWarning().noquote() << QStringLiteral("[webfilter] 清除失败：%1").arg(error);
+    }
+    if (settingsWindow_) {
+        settingsWindow_->setWebFilterBusy(false);
+        settingsWindow_->setWebFilterError(webFilterError_);
+        settingsWindow_->refresh();
+        settingsWindow_->setWebFilterPolicyActive(WebFilter::isActive());
+    }
 }
 
 void PetController::onTeacherStarted(const QString& goal, bool hasApiKey, bool pomodoro) {

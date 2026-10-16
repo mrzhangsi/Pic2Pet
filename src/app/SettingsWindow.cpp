@@ -875,7 +875,8 @@ QScrollArea* SettingsWindow::buildTeacherPage() {
         if (!suppressSignals_) emit teacherWebFilterToggled(on);
     });
     addRow(web, QStringLiteral("网站白名单（Edge）"),
-           QStringLiteral("开启后 Edge 只能访问下面的网站；Pic2Pet 退出时自动解除"),
+           QStringLiteral("开启后 Edge 只能访问下面的网站。写入系统级策略，"
+                          "每次开关都会弹管理员授权；Pic2Pet 退出时自动解除"),
            webFilterToggle_);
 
     // 条目列表：行内删除。空名单时开关置灰（开启 = 把 Edge 整个关死）
@@ -914,6 +915,17 @@ QScrollArea* SettingsWindow::buildTeacherPage() {
     webFilterStatusLabel_ = label(QString(), QStringLiteral("rowSub"));
     webFilterStatusLabel_->setWordWrap(true);
     wsh->addWidget(webFilterStatusLabel_, 1);
+
+    // 快捷入口：策略不是实时生效的，用户需要一个地方去看"到底生效没有"，
+    // 并且能在那里点「重新加载」强制 Edge 立刻重读策略
+    auto* policyBtn = ghostButton(QStringLiteral("打开 edge://policy"));
+    policyBtn->setToolTip(
+        QStringLiteral("查看 Edge 实际读到的策略；策略没实时生效时，"
+                       "在那个页面点「重新加载」可以立刻重读"));
+    connect(policyBtn, &QPushButton::clicked, this, [] {
+        QDesktopServices::openUrl(QUrl(QStringLiteral("edge://policy")));
+    });
+    wsh->addWidget(policyBtn, 0, Qt::AlignVCenter);
     qobject_cast<QVBoxLayout*>(web->layout())->addWidget(webStatusRow);
 
     auto* lay = pageLayout(page);
@@ -973,8 +985,10 @@ void SettingsWindow::refreshTeacher() {
     teacherBreakSpin_->setValue(int(t.pomodoro.breakMinutes));
 
     webFilterToggle_->setChecked(t.webFilter.enabled);
-    // 空名单禁止开启（否则等于把 Edge 整个关死）；开着的时候条目不可能为空
-    webFilterToggle_->setEnabled(!t.webFilter.entries.isEmpty() || t.webFilter.enabled);
+    // 空名单禁止开启（否则等于把 Edge 整个关死）；开着的时候条目不可能为空。
+    // 提权等待中一律禁用——否则这里会把 busy 态覆盖掉，用户能连点开一堆 UAC
+    webFilterToggle_->setEnabled(!webFilterBusy_
+                                  && (!t.webFilter.entries.isEmpty() || t.webFilter.enabled));
     rebuildWebFilterList();
     updateWebFilterStatus();
 
@@ -994,6 +1008,23 @@ void SettingsWindow::setTeacherRunning(bool running) {
 
 void SettingsWindow::setWebFilterError(const QString& error) {
     webFilterErrorText_ = error;
+    updateWebFilterStatus();
+}
+
+void SettingsWindow::setWebFilterPolicyActive(bool active) {
+    policyStillActive_ = active;
+    updateWebFilterStatus();
+}
+
+void SettingsWindow::setWebFilterBusy(bool busy) {
+    webFilterBusy_ = busy;
+    if (webFilterToggle_) {
+        webFilterToggle_->setEnabled(!busy);
+        // 提权等待时给出可解释的等待态，而不是让用户盯着一个没反应的开关
+        webFilterToggle_->setToolTip(
+            busy ? QStringLiteral("正在等待管理员授权…")
+                 : QStringLiteral("开启或关闭都需要管理员授权（写入系统级 Edge 策略）"));
+    }
     updateWebFilterStatus();
 }
 
@@ -1038,6 +1069,11 @@ void SettingsWindow::rebuildWebFilterList() {
 void SettingsWindow::updateWebFilterStatus() {
     if (!webFilterStatusLabel_) return;
 
+    if (webFilterBusy_) {
+        webFilterStatusLabel_->setText(QStringLiteral("正在等待管理员授权…请在弹出的窗口点「是」。"));
+        webFilterStatusLabel_->setStyleSheet(QStringLiteral("color:#8E8E93;"));
+        return;
+    }
     if (!webFilterErrorText_.isEmpty()) {
         webFilterStatusLabel_->setText(webFilterErrorText_);
         webFilterStatusLabel_->setStyleSheet(QStringLiteral("color:#FF3B30;"));
@@ -1047,9 +1083,17 @@ void SettingsWindow::updateWebFilterStatus() {
 
     const TeacherConfig& t = settings_->data.teacher;
     if (t.webFilter.enabled) {
+        // enabled=true 只代表"用户想要这个限制"。上一条消息（controller 查过注册表）
+        // 告诉我们策略是否真的还挂着 —— 进程被强杀时限制仍在，正常退出则已被清除。
         webFilterStatusLabel_->setText(
-            QStringLiteral("已生效：Edge 只能访问上面 %1 个网站（退出 Pic2Pet 自动解除）")
-                .arg(t.webFilter.entries.size()));
+            policyStillActive_
+                ? QStringLiteral("生效中：Edge 只能访问上面 %1 个网站。"
+                                 "策略不是实时生效的——重启 Edge、或等约 15 分钟，"
+                                 "或到 edge://policy 点「重新加载」才会拦上。")
+                      .arg(t.webFilter.entries.size())
+                : QStringLiteral("限制当前未生效：上次开启的策略已不在注册表里"
+                                 "（正常退出 Pic2Pet 会自动解除）。"
+                                 "把上面的开关关掉再打开即可重新写入。"));
     } else if (t.webFilter.entries.isEmpty()) {
         webFilterStatusLabel_->setText(QStringLiteral("未开启。先添加至少一个网站才能开启。"));
     } else {

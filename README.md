@@ -41,11 +41,18 @@
 - **网站白名单（Edge，可选，默认关）**：开启后本机 **Microsoft Edge 只能访问白名单里的网站**
   （路径按**前缀匹配**：`example.com/math` 放行所有 `/math…` 开头的路径；
   主机名不带点 = 含全部子域，带点 = 只匹配该主机；不带 `https://` 时 http/https 都放行）。
-  用的是 **Edge 官方策略**（URLBlocklist + URLAllowlist，写入当前用户的注册表，**不需要管理员**），
-  Edge 动态刷新、原生拦页；**只影响 Edge**，其他浏览器不受限制。
-  **退出 Pic2Pet 时自动解除**（用户预先配的策略值会先备份、退出时原样恢复）；
-  若 Pic2Pet 被强行杀死，下次启动按当前开关重放。条目在设置页「AI 教官」分页里配置，
-  **空名单禁止开启**（否则等于把 Edge 整个关死）。检测到组织 / 学校下发的策略时会拒绝开启（避免互相覆盖）
+  用的是 **Edge 官方策略**（URLBlocklist 全拦 + URLAllowlist 放行白名单），Edge 原生拦页。
+  **只影响 Edge**，其他浏览器不受限制。
+  - **每次开启 / 关闭都会弹一次管理员授权（UAC）**。原因是策略必须写在
+    `HKLM\SOFTWARE\Policies\Microsoft\Edge`：**用户级那条路 `HKCU\SOFTWARE\Policies`
+    出厂就只读**（只有 SYSTEM / Administrators 可写，微软文档说明这是为了防止用户
+    自行解除组策略），而 Edge 在 Windows 上只有注册表一个策略入口。
+  - 因此这是**机器级**限制：**本机所有 Windows 账户**的 Edge 都会被一起限。
+  - **退出 Pic2Pet 时自动解除**（同样弹一次 UAC；用户预先配的策略值会先备份、
+    退出时原样恢复）。若 Pic2Pet 被强行杀死，策略会留着继续生效，下次启动会提示。
+  - ⚠️ **策略不是实时生效的**：Edge 在启动时读，之后约每 15 分钟重读一次，
+    或在 `edge://policy` 点「重新加载」。设置页里有「打开 edge://policy」按钮。
+  - 条目在设置页「AI 教官」分页里配置，**空名单禁止开启**（否则等于把 Edge 整个关死）。
 - **低开销**：素材加载时一次性预解码，播放期零解码；播放按"下一帧 deadline"唤醒（不是固定 16ms 空转）；
   窗口不可见或最小化时全部停摆
   - 实测（240×240）：动画内存 ≈ 90 MB、唤醒 ≈ 12 次/秒@10fps；静态图内存 ≈ 80 MB
@@ -102,7 +109,9 @@ Pic2Pet.exe --teacher              REM 启动后立即开启 AI 教官监控（�
 
 1. **「输入模式」（默认关闭）**：勾选后会调用 `SetWindowsHookEx(WH_KEYBOARD_LL)` 安装一个**全局低层键盘钩子**，用于"你敲键盘时桌宠跟着动"。它只把按键的**虚拟键码**交给桌宠逻辑，**不记录、不落盘、不打日志**任何按键内容，但**客观上它是一个钩子**。
 2. **「AI 教官」（默认关闭）**：启动后会**定时截屏 / 拍照**，并在本地规则拿不准时把「屏幕 + 摄像头」合成的一张图通过 HTTPS 发给你配置的大模型端点（默认 DeepSeek）做判定。图片**不落盘**、不上传除该端点外的任何地方，日志只记字节数；API key 只写本机配置文件。停止后本功能完全静默。
-3. **「网站白名单（Edge）」（默认关闭）**：开启后会往当前用户注册表 `HKCU\SOFTWARE\Policies\Microsoft\Edge` 写两个键值（URLBlocklist 全拦 + URLAllowlist 放行白名单）来限制 Edge 上网，**不需要管理员权限**。你预先配的 Edge 策略值会先备份到 `HKCU\SOFTWARE\Pic2Pet\WebFilterBackup`，**退出 Pic2Pet 时原样恢复并清除我们写的值**；Edge 里显示「Managed by your organization」是预期行为。
+3. **「网站白名单（Edge）」（默认关闭）**：开启后会**弹一次 UAC 管理员授权**，然后以提权子进程往 `HKLM\SOFTWARE\Policies\Microsoft\Edge` 写两个键值（URLBlocklist 全拦 + URLAllowlist 放行白名单）来限制 Edge 上网。你预先配的 Edge 策略值会先备份到 `HKLM\SOFTWARE\Pic2Pet\WebFilterBackup`，**退出 Pic2Pet 时（再弹一次 UAC）原样恢复并清除我们写的值**。Edge 里显示「Managed by your organization」是预期行为。这必然比普通权限程序更容易触发杀软提示——它确实在**修改系统级安全策略**，这是功能的性质决定的，不是可以绕过的误报。
+
+另外一处需要更正：exe 清单仍是 `asInvoker`（主进程不申请管理员），但**开启 / 关闭白名单时会用 `runas` 拉起一个提权的自身子进程**去写策略——这是 Edge 策略唯一可行的官方途径（用户级策略键出厂只读）。
 
 但作为**未签名 exe + 鼠标穿透 + 可选开机自启 +（可选）全局键盘钩子 +（可选）联网 +（可选）写 Edge 策略**的组合，容易被 Windows Defender / SmartScreen 误报（**开启输入模式会明显加重误报**）。我们已采取缓解措施：exe 内嵌应用清单声明不申请管理员权限（`asInvoker`）、DPI 感知、Win10/11 兼容；键盘监听、AI 教官与网站白名单**默认关闭**，只有你主动开启。若仍被拦截，最彻底的办法是对 exe 做 **Authenticode 代码签名**（需代码签名证书）。开源 + CI 可复现构建也便于你自行核验二进制与源码一致。
 

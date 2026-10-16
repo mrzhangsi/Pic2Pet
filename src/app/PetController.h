@@ -13,7 +13,7 @@
 #include "PetMotion.h"
 #include "Settings.h"
 #include "TeacherMonitor.h"
-#include "WebFilter.h"
+#include "WebFilterElevated.h"
 
 class QMenu;
 class QSystemTrayIcon;
@@ -76,11 +76,22 @@ public:
      * 开启后本机 Edge 只能访问白名单网站（路径按前缀匹配，语义见
      * TeacherConfig.h 的 WebFilterCfg）。entries 为空 = 拒绝开启
      * （否则 URLBlocklist 全拦会把 Edge 整个关死）。
-     * 实现 = 写 HKCU\SOFTWARE\Policies\Microsoft\Edge 策略，无需管理员；
-     * **Pic2Pet 退出时自动清除**（用户要求「关闭 Pic2Pet 时限制不保留」）。
+     *
+     * 实现 = 写 **HKLM**\SOFTWARE\Policies\Microsoft\Edge 策略，**每次开关都要弹 UAC**
+     * （HKCU\Software\Policies 出厂默认只读，写不了；原因见 WebFilter.h）。
+     * 因此这是**机器级**限制：本机所有账户的 Edge 都会被一起限。
+     *
+     * **Pic2Pet 退出时自动清除**（用户要求「关闭 Pic2Pet 时限制不保留」），
+     * 代价是退出时会再弹一次 UAC。
+     *
+     * 这里是异步的（提权要十几秒，不能卡住 GUI）；结果通过
+     * setWebFilterError 回报，设置窗口自己拉取状态。
      */
     void setWebFilter(bool on, const QStringList& entries);
     bool webFilterEnabled() const { return settings_.data.teacher.webFilter.enabled; }
+
+    /** 白名单操作是否正在进行（提权等待中）——UI 据此禁用开关 */
+    bool webFilterBusy() const { return webFilterBusy_; }
 
     /**
      * 开关"输入模式"：全局监听键盘，敲键时触发「输入」动作。
@@ -208,8 +219,8 @@ private:
     TeacherStatus lastTeacherStatus_;   // 供设置页回灌的最近一次状态
 
     // ---- Edge 网站白名单（独立小工具，值语义持有；退出时清除）----
-    WebFilter webFilter_;
     QString webFilterError_;   // 最近一次开启失败的原因（喂给设置页与托盘）
+    bool webFilterBusy_ = false;   // 提权等待中：UI 要禁用开关，避免连点开一堆 UAC
 
     FrameSequence seq_;             // 当前正在播放的动作序列（= actions_ 里当前动作的 seq）
     ActionSet actions_;             // 待机 / 单击 / 双击 / 拖拽

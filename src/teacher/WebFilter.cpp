@@ -12,11 +12,20 @@
 
 namespace {
 
+// 策略写在 HKLM（机器级）。**不能**用 HKCU\SOFTWARE\Policies：
+// 那个键 Windows 出厂默认就把普通用户降成只读（只有 SYSTEM/Administrators 可写，
+// inherited=False 的显式 ACE），微软文档明说是为了防止用户自行解除组策略。
+// 所以走 HKLM 就必然要 UAC 提权 —— 提权那一下由调用方（PetController）用
+// "runas" 重启自身完成，本文件只管注册表读写。
+// 备份键跟着放 HKLM：读写方都是提权后的进程，同一权限域，免得读不到标记。
 const wchar_t* kPolicyRoot = L"SOFTWARE\\Policies\\Microsoft\\Edge";
 const wchar_t* kBackupRoot = L"SOFTWARE\\Pic2Pet\\WebFilterBackup";
 const wchar_t* kBlocklistName = L"URLBlocklist";
 const wchar_t* kAllowlistName = L"URLAllowlist";
 const wchar_t* kOwnedMarker = L"owned";   // 备份键里有它 = 当前策略值是我们写的
+
+/** 策略与备份所在的 hive。写它要求进程已提权（HKEY 是句柄别名，不能 constexpr） */
+const HKEY kHive = HKEY_LOCAL_MACHINE;
 
 /** 注册表值的原始快照（按原名、原类型、原数据整体搬运） */
 struct RegValue {
@@ -122,7 +131,7 @@ void deleteKeyIfEmpty(HKEY root, const wchar_t* path) {
  */
 bool backupValues(HKEY backupParent, const wchar_t* policySubName) {
     HKEY src = nullptr;
-    if (!openKey(HKEY_CURRENT_USER, joinPath(kPolicyRoot, policySubName).c_str(),
+    if (!openKey(kHive, joinPath(kPolicyRoot, policySubName).c_str(),
                  KEY_READ, &src)) {
         return true;   // 没有预存值，无需备份
     }
@@ -156,18 +165,18 @@ void restoreValues(HKEY backupParent, const wchar_t* policySubName) {
     if (values.empty()) return;
 
     HKEY dst = nullptr;
-    if (!createKey(HKEY_CURRENT_USER, joinPath(kPolicyRoot, policySubName).c_str(), &dst)) {
+    if (!createKey(kHive, joinPath(kPolicyRoot, policySubName).c_str(), &dst)) {
         return;
     }
     for (const RegValue& v : values) setRawValue(dst, v);
     RegCloseKey(dst);
 
-    deleteKeyIfEmpty(HKEY_CURRENT_USER, joinPath(kBackupRoot, policySubName).c_str());
+    deleteKeyIfEmpty(kHive, joinPath(kBackupRoot, policySubName).c_str());
 }
 
 bool backupOwnedByUs() {
     HKEY key = nullptr;
-    if (!openKey(HKEY_CURRENT_USER, kBackupRoot, KEY_READ, &key)) return false;
+    if (!openKey(kHive, kBackupRoot, KEY_READ, &key)) return false;
     DWORD data = 0;
     DWORD size = sizeof(data);
     const bool owned = RegQueryValueExW(key, kOwnedMarker, nullptr, nullptr,
@@ -179,7 +188,7 @@ bool backupOwnedByUs() {
 
 bool markBackupOwned() {
     HKEY key = nullptr;
-    if (!createKey(HKEY_CURRENT_USER, kBackupRoot, &key)) return false;
+    if (!createKey(kHive, kBackupRoot, &key)) return false;
     DWORD one = 1;
     const bool ok = RegSetValueExW(key, kOwnedMarker, 0, REG_DWORD,
                                    reinterpret_cast<const BYTE*>(&one), sizeof(one))
@@ -190,11 +199,11 @@ bool markBackupOwned() {
 
 void removeBackupMarker() {
     HKEY key = nullptr;
-    if (openKey(HKEY_CURRENT_USER, kBackupRoot, KEY_ALL_ACCESS, &key)) {
+    if (openKey(kHive, kBackupRoot, KEY_ALL_ACCESS, &key)) {
         RegDeleteValueW(key, kOwnedMarker);
         RegCloseKey(key);
     }
-    deleteKeyIfEmpty(HKEY_CURRENT_USER, kBackupRoot);
+    deleteKeyIfEmpty(kHive, kBackupRoot);
 }
 
 } // namespace
@@ -203,12 +212,23 @@ namespace pic2pet {
 
 bool WebFilter::isSupported() { return true; }
 
-bool WebFilter::hasMachinePolicyConflict() {
+/**
+ * 策略键里现在有没有**不是我们写的**的值。
+ *
+ * 这取代了原先的 hasMachinePolicyConflict()：那个函数靠"HKLM 已有值"判定组织策略，
+ * 但我们改成写 HKLM 之后会永远命中我们自己写的值，语义直接失效。
+ * 现在真正要回答的是「clear() 之后能不能干净地还原成原样」——
+ * 有预存值就必须先备份（backupValues），否则会把别人的东西删掉。
+ *
+ * owned 标记在备份键里：标记说明这些值是我们上次写的，不需要再备份。
+ */
+bool WebFilter::hasForeignPolicyValues() {
+    if (backupOwnedByUs()) return false;
     const std::wstring paths[] = {joinPath(kPolicyRoot, kBlocklistName),
                                   joinPath(kPolicyRoot, kAllowlistName)};
     for (const std::wstring& p : paths) {
         HKEY key = nullptr;
-        if (openKey(HKEY_LOCAL_MACHINE, p.c_str(), KEY_READ, &key)) {
+        if (openKey(kHive, p.c_str(), KEY_READ, &key)) {
             const bool hasValues = !enumValues(key).empty();
             RegCloseKey(key);
             if (hasValues) return true;
@@ -217,9 +237,24 @@ bool WebFilter::hasMachinePolicyConflict() {
     return false;
 }
 
+/**
+ * 当前进程是否已提权。写 HKLM 的前提。
+ * 注意：管理员账户在**未提权**的进程里也是 false —— 组成员身份不等于令牌里有管理员权限。
+ */
+bool WebFilter::isElevated() {
+    HANDLE token = nullptr;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) return false;
+    TOKEN_ELEVATION elev = {};
+    DWORD size = sizeof(elev);
+    const bool ok = GetTokenInformation(token, TokenElevation,
+                                        &elev, sizeof(elev), &size) != 0;
+    CloseHandle(token);
+    return ok && elev.TokenIsElevated != 0;
+}
+
 bool WebFilter::isActive() {
     HKEY key = nullptr;
-    if (!openKey(HKEY_CURRENT_USER, joinPath(kPolicyRoot, kBlocklistName).c_str(),
+    if (!openKey(kHive, joinPath(kPolicyRoot, kBlocklistName).c_str(),
                  KEY_READ, &key)) {
         return false;
     }
@@ -260,11 +295,11 @@ bool WebFilter::apply(const QStringList& rawEntries) {
         return false;
     }
 
-    // ---- 2. 组织策略冲突：HKLM 同名策略会覆盖用户级写入，且不是我们的东西 ----
-    if (hasMachinePolicyConflict()) {
-        error_ = QStringLiteral(
-            "检测到组织/学校下发的 Edge 策略（HKLM 已有 URLBlocklist/URLAllowlist），"
-            "用户级白名单会被它覆盖。请先移除组织策略再开启。");
+    // ---- 2. 写 HKLM 的前提是已提权 ----
+    // 正常流程由调用方用 "runas" 重启自身完成，走不到这里；
+    // 真的走到（没提权就调）说明调用方接线错了，直接拒绝而不是留下半截状态。
+    if (!isElevated()) {
+        error_ = QStringLiteral("需要管理员权限才能写入 Edge 策略");
         return false;
     }
 
@@ -272,7 +307,7 @@ bool WebFilter::apply(const QStringList& rawEntries) {
     {
         HKEY key = nullptr;
         bool same = false;
-        if (openKey(HKEY_CURRENT_USER, joinPath(kPolicyRoot, kAllowlistName).c_str(),
+        if (openKey(kHive, joinPath(kPolicyRoot, kAllowlistName).c_str(),
                     KEY_READ, &key)) {
             std::vector<std::wstring> current;
             for (const RegValue& v : enumValues(key)) {
@@ -293,8 +328,8 @@ bool WebFilter::apply(const QStringList& rawEntries) {
     // ---- 4. 备份预存值（我们上次写的除外：owned 标记在备份键里） ----
     if (!backupOwnedByUs()) {
         HKEY backupParent = nullptr;
-        if (!createKey(HKEY_CURRENT_USER, kBackupRoot, &backupParent)) {
-            error_ = QStringLiteral("无法创建备份注册表键（HKCU\\SOFTWARE\\Pic2Pet）");
+        if (!createKey(kHive, kBackupRoot, &backupParent)) {
+            error_ = QStringLiteral("无法创建备份注册表键（HKLM\\SOFTWARE\\Pic2Pet）");
             return false;
         }
         const bool okBlock = backupValues(backupParent, kBlocklistName);
@@ -303,23 +338,23 @@ bool WebFilter::apply(const QStringList& rawEntries) {
         if (!okBlock || !okAllow) {
             error_ = QStringLiteral(
                 "Edge 策略里已有无法识别的预存值，为避免弄丢它们，已拒绝开启。"
-                "可手动清理 HKCU\\SOFTWARE\\Policies\\Microsoft\\Edge 下的 "
+                "可手动清理 HKLM\\SOFTWARE\\Policies\\Microsoft\\Edge 下的 "
                 "URLBlocklist / URLAllowlist 后重试。");
             return false;
         }
         // 即使两个键都没有预存值，也打下 owned 标记（声明所有权）。
         // 打不上标记 = 无法证明所有权，宁可拒绝开启（否则以后想清都清不干净）
         if (!markBackupOwned()) {
-            error_ = QStringLiteral("无法标记备份所有权（HKCU\\SOFTWARE\\Pic2Pet）");
+            error_ = QStringLiteral("无法标记备份所有权（HKLM\\SOFTWARE\\Pic2Pet）");
             return false;
         }
     }
 
     // ---- 5. 写策略 ----
     HKEY blockKey = nullptr;
-    if (!createKey(HKEY_CURRENT_USER, joinPath(kPolicyRoot, kBlocklistName).c_str(),
+    if (!createKey(kHive, joinPath(kPolicyRoot, kBlocklistName).c_str(),
                    &blockKey)) {
-        error_ = QStringLiteral("写入 URLBlocklist 失败（注册表访问被拒？）");
+        error_ = QStringLiteral("写入 URLBlocklist 失败（注册表访问被拒，可能被安全软件拦截）");
         return false;
     }
     for (const RegValue& v : enumValues(blockKey)) deleteValue(blockKey, v.name);
@@ -327,9 +362,9 @@ bool WebFilter::apply(const QStringList& rawEntries) {
     RegCloseKey(blockKey);
 
     HKEY allowKey = nullptr;
-    if (!createKey(HKEY_CURRENT_USER, joinPath(kPolicyRoot, kAllowlistName).c_str(),
+    if (!createKey(kHive, joinPath(kPolicyRoot, kAllowlistName).c_str(),
                    &allowKey)) {
-        error_ = QStringLiteral("写入 URLAllowlist 失败（注册表访问被拒？）");
+        error_ = QStringLiteral("写入 URLAllowlist 失败（注册表访问被拒，可能被安全软件拦截）");
         return false;
     }
     for (const RegValue& v : enumValues(allowKey)) deleteValue(allowKey, v.name);
@@ -358,12 +393,12 @@ void WebFilter::clear() {
 
     // 1. 删掉我们写的编号值（URLBlocklist 的 "*" 与 URLAllowlist 的条目）
     HKEY key = nullptr;
-    if (openKey(HKEY_CURRENT_USER, joinPath(kPolicyRoot, kBlocklistName).c_str(),
+    if (openKey(kHive, joinPath(kPolicyRoot, kBlocklistName).c_str(),
                 KEY_ALL_ACCESS, &key)) {
         deleteNumberedValues(key);
         RegCloseKey(key);
     }
-    if (openKey(HKEY_CURRENT_USER, joinPath(kPolicyRoot, kAllowlistName).c_str(),
+    if (openKey(kHive, joinPath(kPolicyRoot, kAllowlistName).c_str(),
                 KEY_ALL_ACCESS, &key)) {
         deleteNumberedValues(key);
         RegCloseKey(key);
@@ -372,7 +407,7 @@ void WebFilter::clear() {
     // 2. 有备份 → 原样写回用户/组织预存值
     {
         HKEY bp = nullptr;
-        if (openKey(HKEY_CURRENT_USER, kBackupRoot, KEY_READ, &bp)) {
+        if (openKey(kHive, kBackupRoot, KEY_READ, &bp)) {
             restoreValues(bp, kBlocklistName);
             restoreValues(bp, kAllowlistName);
             RegCloseKey(bp);
@@ -381,9 +416,9 @@ void WebFilter::clear() {
     }
 
     // 3. 清掉因此变空的键（只删空的，绝不碰还有值的）
-    deleteKeyIfEmpty(HKEY_CURRENT_USER, joinPath(kPolicyRoot, kBlocklistName).c_str());
-    deleteKeyIfEmpty(HKEY_CURRENT_USER, joinPath(kPolicyRoot, kAllowlistName).c_str());
-    deleteKeyIfEmpty(HKEY_CURRENT_USER, kPolicyRoot);
+    deleteKeyIfEmpty(kHive, joinPath(kPolicyRoot, kBlocklistName).c_str());
+    deleteKeyIfEmpty(kHive, joinPath(kPolicyRoot, kAllowlistName).c_str());
+    deleteKeyIfEmpty(kHive, kPolicyRoot);
 }
 
 } // namespace pic2pet

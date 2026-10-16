@@ -8,6 +8,7 @@
 #include "ClickThrough.h"
 #include "PetController.h"
 #include "Theme.h"
+#include "WebFilterElevated.h"
 
 namespace {
 
@@ -33,6 +34,21 @@ int main(int argc, char** argv) {
     QApplication::setWindowIcon(QIcon(QStringLiteral(":/app.ico")));   // 来自 app.qrc
     QApplication::setQuitOnLastWindowClosed(false);   // 托盘模式下关窗不退出
     pic2pet::theme::applyAppStyle(&app);              // 界面字体（样式表只挂在设置窗口上）
+
+    // ---- 提权子进程：写/清 Edge 策略后立刻退出，绝不进入桌宠流程 ----
+    // 必须放在 QCommandLineParser 之前：parser 遇到不认识的参数会直接 exit()，
+    // 而这两个参数是给"提权重启的自己"用的，不注册成 parser 选项。
+    for (int i = 1; i + 1 < argc; ++i) {
+        const QString arg = QString::fromLocal8Bit(argv[i]);
+        if (arg == QLatin1String(pic2pet::WebFilterElevated::kApplyArg)) {
+            pic2pet::WebFilterElevated::runChildJob(QString::fromLocal8Bit(argv[i + 1]), true);
+            return 0;
+        }
+        if (arg == QLatin1String(pic2pet::WebFilterElevated::kClearArg)) {
+            pic2pet::WebFilterElevated::runChildJob(QString::fromLocal8Bit(argv[i + 1]), false);
+            return 0;
+        }
+    }
 
     QCommandLineParser parser;
     parser.setApplicationDescription(QStringLiteral("Pic2Pet：透明桌宠，支持 GIF / APNG / 静态图"));

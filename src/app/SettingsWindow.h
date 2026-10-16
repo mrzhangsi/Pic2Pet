@@ -51,6 +51,17 @@ public:
     /** 网站白名单：控制器喂进来的最近一次错误（空 = 正常）。refresh 后会再调一次 */
     void setWebFilterError(const QString& error);
 
+    /** 网站白名单：提权等待中。期间禁用开关并在状态行说明，避免连点开一堆 UAC */
+    void setWebFilterBusy(bool busy);
+
+    /**
+     * 网站白名单：注册表里策略是否真的挂着。
+     * 与 settings 里的 enabled 是**两回事** —— enabled 是"用户想要什么"，
+     * 这个是"现在实际是什么"。进程被强杀时两者会不一致（策略还在但软件没了），
+     * 正常退出则相反（enabled 记着 true、策略已被清除）。UI 要如实区分。
+     */
+    void setWebFilterPolicyActive(bool active);
+
     /** 切到某一页（0 素材 / 1 动作 / 2 输入 / 3 动态效果 / 4 外观 / 5 通用 / 6 AI 教官） */
     void showPage(int index);
 
@@ -176,6 +187,8 @@ private:
     QLineEdit* webFilterEntryEdit_ = nullptr;   // 新条目输入框
     QLabel* webFilterStatusLabel_ = nullptr;    // 状态行（生效中 / 未开启 / 失败原因）
     QString webFilterErrorText_;                // 控制器喂进来的错误（空 = 正常）
+    bool webFilterBusy_ = false;                // 提权等待中：禁用开关
+    bool policyStillActive_ = false;            // 控制器查过注册表：策略实际是否挂着
 
     QHash<int, ActionRow> actionRows_;   // key = int(PetAction)
 

@@ -141,6 +141,9 @@ PetController::~PetController() {
         }
         delete teacher_;
     }
+    // 用户要求「关闭 Pic2Pet 时限制不保留」：退出即解除 Edge 限制。
+    // 没开启过时 clear() 见到没有所有权标记会直接返回，绝不碰用户自己的策略值
+    clearWebFilter();
 }
 
 void PetController::start(const QString& cliMedia) {
@@ -171,6 +174,12 @@ void PetController::start(const QString& cliMedia) {
 
     // 输入模式：上次开着的话这里恢复。默认 false，所以正常情况下不会装钩子
     if (settings_.data.inputMode) setInputMode(true);
+
+    // 网站白名单：上次开着的话重放一次。两条路都会走到这——
+    //   ① 正常退出已清除，这里按 enabled 重新写上（状态一致）
+    //   ② 进程被异常杀死（任务管理器等），策略可能还挂着：apply() 幂等，
+    //      发现注册表里已是目标状态就什么都不做
+    if (settings_.data.teacher.webFilter.enabled) applyWebFilter();
 
     // 动态通道：按上次的强度起步（强度 0 时什么都不会起）
     applyMotionParams();
@@ -737,6 +746,7 @@ void PetController::refreshSettingsWindow() {
     settingsWindow_->setPausedState(paused_);
     settingsWindow_->setTeacherRunning(teacher_ != nullptr);
     if (teacher_) settingsWindow_->setTeacherStatus(lastTeacherStatus_);
+    settingsWindow_->setWebFilterError(webFilterError_);
 }
 
 void PetController::applyAppearance(int scalePercent, int opacityPercent, bool alwaysOnTop,
@@ -876,6 +886,20 @@ void PetController::openSettings(int page) {
                 [this] { startTeacher(); });
         connect(settingsWindow_, &SettingsWindow::teacherStopRequested, this,
                 [this] { stopTeacher(); });
+        // ---- 网站白名单（Edge）：同样只发意图 ----
+        connect(settingsWindow_, &SettingsWindow::teacherWebFilterToggled, this,
+                [this](bool on) { setWebFilter(on, settings_.data.teacher.webFilter.entries); });
+        connect(settingsWindow_, &SettingsWindow::teacherWebFilterEntriesChanged, this,
+                [this](const QStringList& entries) {
+                    settings_.data.teacher.webFilter.entries = entries;
+                    settings_.save();
+                    // 开着的时候改条目 = 立即重写策略（Edge 动态刷新，不用重启浏览器）
+                    if (settings_.data.teacher.webFilter.enabled) applyWebFilter();
+                    if (settingsWindow_) {
+                        settingsWindow_->setWebFilterError(webFilterError_);
+                        settingsWindow_->refresh();
+                    }
+                });
     }
 
     refreshSettingsWindow();
@@ -968,6 +992,64 @@ void PetController::stopTeacher() {
     // finished 信号到达时才真正删除对象。
     if (settingsWindow_) settingsWindow_->setTeacherRunning(false);
     if (tray_) tray_->setToolTip(QStringLiteral("Pic2Pet"));
+}
+
+void PetController::setWebFilter(bool on, const QStringList& entries) {
+    // 空名单禁止开启：URLBlocklist 是 "*"（全拦），空 allowlist 会把 Edge 整个关死。
+    // UI 层有同样的约束，这里再兜一层（右键菜单 / 配置被手改都可能绕开 UI）
+    if (on && entries.isEmpty()) {
+        webFilterError_ = QStringLiteral("白名单还是空的：先添加至少一个网站再开启");
+        qWarning().noquote() << QStringLiteral("[webfilter] 拒绝开启：白名单为空");
+        if (settingsWindow_) {
+            settingsWindow_->setWebFilterError(webFilterError_);
+            settingsWindow_->refresh();
+        }
+        return;
+    }
+
+    settings_.data.teacher.webFilter.enabled = on;
+    settings_.data.teacher.webFilter.entries = entries;
+    settings_.save();
+
+    if (on) {
+        applyWebFilter();
+    } else {
+        clearWebFilter();
+    }
+
+    if (settingsWindow_) {
+        settingsWindow_->setWebFilterError(webFilterError_);
+        settingsWindow_->refresh();
+    }
+}
+
+void PetController::applyWebFilter() {
+    if (!WebFilter::isSupported()) {
+        // 非 Windows：记住开关但不生效（其他平台没有 Edge 策略这东西）
+        qInfo().noquote() << QStringLiteral("[webfilter] 当前平台不支持，仅 Windows 生效");
+        return;
+    }
+
+    if (webFilter_.apply(settings_.data.teacher.webFilter.entries)) {
+        webFilterError_.clear();
+        qInfo().noquote()
+            << QStringLiteral("[webfilter] 已开启：Edge 仅允许 %1 个白名单网站")
+                   .arg(settings_.data.teacher.webFilter.entries.size());
+        return;
+    }
+
+    // 失败：把开关拨回去，绝不留「设置说开着、实际没拦」的两套状态
+    webFilterError_ = webFilter_.error();
+    settings_.data.teacher.webFilter.enabled = false;
+    settings_.save();
+    qWarning().noquote() << QStringLiteral("[webfilter] 开启失败：%1").arg(webFilterError_);
+}
+
+void PetController::clearWebFilter() {
+    if (!WebFilter::isSupported()) return;
+    webFilter_.clear();
+    webFilterError_.clear();
+    qInfo().noquote() << QStringLiteral("[webfilter] 已清除，Edge 恢复自由访问");
 }
 
 void PetController::onTeacherStarted(const QString& goal, bool hasApiKey, bool pomodoro) {
@@ -1277,6 +1359,25 @@ void PetController::rebuildMenu(QMenu* menu) {
         }
     });
     menu->addAction(QStringLiteral("AI 教官设置…"), this, [this] { openSettings(6); });
+
+    // 网站白名单（Edge）：独立开关，与 AI 教官运行状态无关。
+    // 勾选态直接读设置值（apply 失败时会被拨回 false，不会说谎）
+    auto* webAction = menu->addAction(QStringLiteral("网站白名单（Edge）"));
+    webAction->setCheckable(true);
+    webAction->setChecked(settings_.data.teacher.webFilter.enabled);
+    webAction->setToolTip(QStringLiteral(
+        "开启后本机 Edge 只能访问白名单里的网站（路径按前缀匹配）。\n"
+        "用的是 Edge 官方策略，无需管理员权限；Pic2Pet 退出时自动解除。\n"
+        "白名单条目在「AI 教官设置…」页里配置。"));
+    // 注意：setChecked 在 connect 之前——QAction 程序化改状态也会发 toggled，
+    // 那时候还没有接收者，不会误触发（与上面 AI 教官项同一套路）
+    connect(webAction, &QAction::toggled, this, [this](bool on) {
+        setWebFilter(on, settings_.data.teacher.webFilter.entries);
+        // 开启失败（空名单 / 组织策略冲突等）：托盘是右键路径上唯一的反馈渠道
+        if (on && !settings_.data.teacher.webFilter.enabled) {
+            teacherNotify(tray_, QStringLiteral("网站白名单开启失败"), webFilterError_);
+        }
+    });
 
     auto* topAction = menu->addAction(QStringLiteral("始终置顶"));
     topAction->setCheckable(true);

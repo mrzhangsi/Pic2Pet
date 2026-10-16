@@ -48,6 +48,9 @@ public:
     void setTeacherRunning(bool running);
     void setTeacherStatus(const TeacherStatus& status);
 
+    /** 网站白名单：控制器喂进来的最近一次错误（空 = 正常）。refresh 后会再调一次 */
+    void setWebFilterError(const QString& error);
+
     /** 切到某一页（0 素材 / 1 动作 / 2 输入 / 3 动态效果 / 4 外观 / 5 通用 / 6 AI 教官） */
     void showPage(int index);
 
@@ -67,6 +70,10 @@ signals:
     void teacherPomodoroChanged(bool enabled, int focusMinutes, int breakMinutes);
     void teacherStartRequested();
     void teacherStopRequested();
+    /** 网站白名单开关（Edge）。控制器负责落盘 + 写策略 + 失败回滚 */
+    void teacherWebFilterToggled(bool on);
+    /** 白名单条目整表替换（增 / 删都走这个信号） */
+    void teacherWebFilterEntriesChanged(const QStringList& entries);
 
     // ---- 动作页：逐项改动 ----
     void actionMediaChosen(PetAction action, const QString& path);
@@ -108,6 +115,14 @@ private:
     QScrollArea* buildTeacherPage();
     void refreshTeacher();
     void updateTeacherStatusUi();
+    /** 网站白名单：按 settings 重建条目列表（行内删除） */
+    void rebuildWebFilterList();
+    /** 网站白名单：刷新状态行（生效中 / 未开启 / 失败原因） */
+    void updateWebFilterStatus();
+    /** 网站白名单：把输入框里的条目加进列表并上报 */
+    void addWebFilterEntry();
+    /** 网站白名单：删掉第 index 个条目并上报 */
+    void removeWebFilterEntry(int index);
     void buildSidebar(QWidget* sidebar);
     void refreshMedia();
     void refreshRecent();
@@ -153,6 +168,14 @@ private:
     TeacherStatus teacherStatus_;
     bool teacherRunning_ = false;
     bool teacherHasReport_ = false;   // 是否收到过结束报告（决定状态卡显示什么）
+
+    // ---- AI 教官页 · 网站白名单（Edge）卡 ----
+    ToggleSwitch* webFilterToggle_ = nullptr;
+    QWidget* webFilterListPage_ = nullptr;      // 条目列表容器（随条目数重建）
+    QVBoxLayout* webFilterListLayout_ = nullptr;
+    QLineEdit* webFilterEntryEdit_ = nullptr;   // 新条目输入框
+    QLabel* webFilterStatusLabel_ = nullptr;    // 状态行（生效中 / 未开启 / 失败原因）
+    QString webFilterErrorText_;                // 控制器喂进来的错误（空 = 正常）
 
     QHash<int, ActionRow> actionRows_;   // key = int(PetAction)
 

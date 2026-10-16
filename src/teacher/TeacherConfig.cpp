@@ -2,6 +2,8 @@
 
 #include <QSettings>
 
+#include <algorithm>
+
 namespace pic2pet {
 
 bool TeacherApi::isDeepSeek() const {
@@ -75,6 +77,25 @@ void TeacherConfig::load(QSettings& s) {
     pomodoro.notify = s.value(QStringLiteral("notify"), pomodoro.notify).toBool();
     s.endGroup();
 
+    s.beginGroup(QStringLiteral("webFilter"));
+    webFilter.enabled = s.value(QStringLiteral("enabled"), webFilter.enabled).toBool();
+    webFilter.entries.clear();
+    // 条目用编号键存（跟 Edge 策略自己的注册表布局一致，也避免 URL 里的逗号
+    // 把 QStringList 的 INI 逗号分隔搅烂）
+    const QStringList keys = s.childKeys();
+    QList<int> nums;
+    for (const QString& k : keys) {
+        bool ok = false;
+        const int n = k.toInt(&ok);
+        if (ok && n > 0) nums.append(n);
+    }
+    std::sort(nums.begin(), nums.end());
+    for (const int n : nums) {
+        const QString v = s.value(QString::number(n)).toString().trimmed();
+        if (!v.isEmpty()) webFilter.entries.append(v);
+    }
+    s.endGroup();
+
     s.endGroup();
 }
 
@@ -131,6 +152,15 @@ void TeacherConfig::save(QSettings& s) const {
     s.setValue(QStringLiteral("focusMinutes"), pomodoro.focusMinutes);
     s.setValue(QStringLiteral("breakMinutes"), pomodoro.breakMinutes);
     s.setValue(QStringLiteral("notify"), pomodoro.notify);
+    s.endGroup();
+
+    s.beginGroup(QStringLiteral("webFilter"));
+    s.setValue(QStringLiteral("enabled"), webFilter.enabled);
+    int n = 0;
+    for (const QString& e : webFilter.entries) {
+        const QString v = e.trimmed();
+        if (!v.isEmpty()) s.setValue(QString::number(++n), v);
+    }
     s.endGroup();
 
     s.endGroup();

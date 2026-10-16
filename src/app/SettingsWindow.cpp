@@ -868,6 +868,54 @@ QScrollArea* SettingsWindow::buildTeacherPage() {
     addRow(pom, QStringLiteral("休息时长"), QStringLiteral("休息期间不截图、不开摄像头"),
            breakRow, true);
 
+    // ---- 网站白名单（Edge）卡：独立开关，与 AI 教官运行状态无关 ----
+    auto* web = card();
+    webFilterToggle_ = new ToggleSwitch;
+    connect(webFilterToggle_, &QAbstractButton::toggled, this, [this](bool on) {
+        if (!suppressSignals_) emit teacherWebFilterToggled(on);
+    });
+    addRow(web, QStringLiteral("网站白名单（Edge）"),
+           QStringLiteral("开启后 Edge 只能访问下面的网站；Pic2Pet 退出时自动解除"),
+           webFilterToggle_);
+
+    // 条目列表：行内删除。空名单时开关置灰（开启 = 把 Edge 整个关死）
+    webFilterListPage_ = new QWidget;
+    webFilterListLayout_ = new QVBoxLayout(webFilterListPage_);
+    webFilterListLayout_->setContentsMargins(16, 10, 16, 10);
+    webFilterListLayout_->setSpacing(6);
+    qobject_cast<QVBoxLayout*>(web->layout())->addWidget(webFilterListPage_);
+    qobject_cast<QVBoxLayout*>(web->layout())->addWidget(separator());
+
+    // 添加行：输入框 + 按钮（回车也能加）
+    auto* addEntryRow = new QWidget;
+    auto* aeh = new QHBoxLayout(addEntryRow);
+    aeh->setContentsMargins(16, 10, 16, 10);
+    aeh->setSpacing(8);
+    webFilterEntryEdit_ = new QLineEdit;
+    webFilterEntryEdit_->setPlaceholderText(
+        QStringLiteral("例如 bilibili.com 或 https://www.example.com/path"));
+    webFilterEntryEdit_->setMinimumWidth(300);
+    webFilterEntryEdit_->setClearButtonEnabled(true);
+    auto* addEntryBtn = primaryButton(QStringLiteral("添加"));
+    connect(addEntryBtn, &QPushButton::clicked, this,
+            [this] { addWebFilterEntry(); });
+    connect(webFilterEntryEdit_, &QLineEdit::returnPressed, this,
+            [this] { addWebFilterEntry(); });
+    aeh->addWidget(webFilterEntryEdit_, 1);
+    aeh->addWidget(addEntryBtn, 0, Qt::AlignVCenter);
+    qobject_cast<QVBoxLayout*>(web->layout())->addWidget(addEntryRow);
+    qobject_cast<QVBoxLayout*>(web->layout())->addWidget(separator());
+
+    // 状态行：占满整行（addRow 的右栏只有 0 拉伸，长文本会被挤扁）
+    auto* webStatusRow = new QWidget;
+    auto* wsh = new QHBoxLayout(webStatusRow);
+    wsh->setContentsMargins(16, 10, 16, 12);
+    wsh->setSpacing(12);
+    webFilterStatusLabel_ = label(QString(), QStringLiteral("rowSub"));
+    webFilterStatusLabel_->setWordWrap(true);
+    wsh->addWidget(webFilterStatusLabel_, 1);
+    qobject_cast<QVBoxLayout*>(web->layout())->addWidget(webStatusRow);
+
     auto* lay = pageLayout(page);
     lay->addWidget(status);
     lay->addSpacing(12);
@@ -876,6 +924,19 @@ QScrollArea* SettingsWindow::buildTeacherPage() {
     lay->addWidget(cap);
     lay->addSpacing(12);
     lay->addWidget(pom);
+    lay->addSpacing(12);
+    lay->addWidget(web);
+    lay->addSpacing(12);
+    lay->addWidget(noteBox(QStringLiteral(
+        "白名单语义直通 Edge 官方策略：路径按前缀匹配（example.com/math 匹配所有 "
+        "/math… 开头的路径）；主机名不带点 = 含全部子域（bilibili.com 含 "
+        "www.bilibili.com），带点前缀 = 只匹配这一个主机名；不带 https:// 时 "
+        "http/https 都放行。\n"
+        "只影响 Microsoft Edge，其他浏览器不受限制；Edge 里显示 "
+        "「Managed by your organization」是预期行为。本地 file:// 链接会被一并拦掉"
+        "（Edge 策略的已知行为）。\n"
+        "退出 Pic2Pet 会自动解除限制；若被强行杀死，下次启动按当前开关重放。"
+        "检测到组织 / 学校下发的策略时会拒绝开启（避免互相覆盖）。")));
     lay->addSpacing(12);
     lay->addWidget(noteBox(QStringLiteral(
         "隐私：只在启动后定时截屏 / 拍照，图片不落盘、不上传除模型外的任何地方，"
@@ -911,6 +972,12 @@ void SettingsWindow::refreshTeacher() {
     teacherFocusSpin_->setValue(int(t.pomodoro.focusMinutes));
     teacherBreakSpin_->setValue(int(t.pomodoro.breakMinutes));
 
+    webFilterToggle_->setChecked(t.webFilter.enabled);
+    // 空名单禁止开启（否则等于把 Edge 整个关死）；开着的时候条目不可能为空
+    webFilterToggle_->setEnabled(!t.webFilter.entries.isEmpty() || t.webFilter.enabled);
+    rebuildWebFilterList();
+    updateWebFilterStatus();
+
     suppressSignals_ = false;
     updateTeacherStatusUi();
 }
@@ -923,6 +990,98 @@ void SettingsWindow::setTeacherStatus(const TeacherStatus& status) {
 void SettingsWindow::setTeacherRunning(bool running) {
     teacherRunning_ = running;
     updateTeacherStatusUi();
+}
+
+void SettingsWindow::setWebFilterError(const QString& error) {
+    webFilterErrorText_ = error;
+    updateWebFilterStatus();
+}
+
+void SettingsWindow::rebuildWebFilterList() {
+    if (!webFilterListLayout_) return;   // 页还没建
+
+    // 整表重建：旧行 deleteLater（删除按钮就在行里，直接 delete 会在
+    // 自己的 clicked 信号栈上作废，用 deleteLater 最稳）
+    while (QLayoutItem* item = webFilterListLayout_->takeAt(0)) {
+        if (QWidget* w = item->widget()) w->deleteLater();
+        delete item;
+    }
+
+    const QStringList& entries = settings_->data.teacher.webFilter.entries;
+    if (entries.isEmpty()) {
+        auto* hint = label(QStringLiteral("还没有条目。至少添加一个网站才能开启——"
+                                          "空名单会把 Edge 整个关死。"),
+                           QStringLiteral("rowSub"));
+        hint->setWordWrap(true);
+        webFilterListLayout_->addWidget(hint);
+        return;
+    }
+
+    const QFontMetrics fm(webFilterEntryEdit_->font());
+    for (int i = 0; i < entries.size(); ++i) {
+        const QString& e = entries.at(i);
+        auto* row = new QWidget;
+        auto* h = new QHBoxLayout(row);
+        h->setContentsMargins(0, 0, 0, 0);
+        h->setSpacing(8);
+        auto* text = label(fm.elidedText(e, Qt::ElideMiddle, 430), QStringLiteral("rowSub"));
+        text->setToolTip(e);   // 长条目悬停看全文
+        h->addWidget(text, 1);
+        auto* del = ghostButton(QStringLiteral("删除"));
+        del->setToolTip(QStringLiteral("从白名单移除：%1").arg(e));
+        connect(del, &QPushButton::clicked, this, [this, i] { removeWebFilterEntry(i); });
+        h->addWidget(del, 0, Qt::AlignVCenter);
+        webFilterListLayout_->addWidget(row);
+    }
+}
+
+void SettingsWindow::updateWebFilterStatus() {
+    if (!webFilterStatusLabel_) return;
+
+    if (!webFilterErrorText_.isEmpty()) {
+        webFilterStatusLabel_->setText(webFilterErrorText_);
+        webFilterStatusLabel_->setStyleSheet(QStringLiteral("color:#FF3B30;"));
+        return;
+    }
+    webFilterStatusLabel_->setStyleSheet(QString());
+
+    const TeacherConfig& t = settings_->data.teacher;
+    if (t.webFilter.enabled) {
+        webFilterStatusLabel_->setText(
+            QStringLiteral("已生效：Edge 只能访问上面 %1 个网站（退出 Pic2Pet 自动解除）")
+                .arg(t.webFilter.entries.size()));
+    } else if (t.webFilter.entries.isEmpty()) {
+        webFilterStatusLabel_->setText(QStringLiteral("未开启。先添加至少一个网站才能开启。"));
+    } else {
+        webFilterStatusLabel_->setText(QStringLiteral("未开启。"));
+    }
+}
+
+void SettingsWindow::addWebFilterEntry() {
+    const QString text = webFilterEntryEdit_->text().trimmed();
+    if (text.isEmpty()) return;
+
+    QStringList entries = settings_->data.teacher.webFilter.entries;
+    if (entries.contains(text)) {
+        // 重复条目：不上报（省一次写盘 + 重放），就地给个反馈。
+        // 不走路过的 error 字段——那条会被控制器随后的 refresh 清掉
+        webFilterEntryEdit_->clear();
+        webFilterStatusLabel_->setText(QStringLiteral("已有相同条目：%1").arg(text));
+        webFilterStatusLabel_->setStyleSheet(QStringLiteral("color:#FF9F0A;"));
+        return;
+    }
+    entries.append(text);
+    webFilterEntryEdit_->clear();
+    webFilterErrorText_.clear();
+    emit teacherWebFilterEntriesChanged(entries);
+}
+
+void SettingsWindow::removeWebFilterEntry(int index) {
+    QStringList entries = settings_->data.teacher.webFilter.entries;
+    if (index < 0 || index >= entries.size()) return;
+    entries.removeAt(index);
+    webFilterErrorText_.clear();
+    emit teacherWebFilterEntriesChanged(entries);
 }
 
 void SettingsWindow::updateTeacherStatusUi() {

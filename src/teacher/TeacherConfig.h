@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QString>
+#include <QStringList>
 
 class QSettings;
 
@@ -74,6 +75,25 @@ struct TeacherPomodoroCfg {
 };
 
 /**
+ * 网站白名单（Edge 上网限制）：开启后 Edge 只能访问 entries 里的网站。
+ *
+ * 语义**直通 Edge 原生策略**（URLBlocklist 写 `*` 全拦 + URLAllowlist 写例外）：
+ *   - 条目格式 `[scheme://][.]host[:port][/path]`，路径为**前缀匹配**
+ *     （`hosting.com/good_path` 匹配所有 `/good_path…` 开头的路径）
+ *   - 主机名不带点前缀 = 含全部子域（`bilibili.com` 匹配 `www.bilibili.com`）；
+ *     带点前缀（`.www.bilibili.com`）= 只匹配这一个精确主机名
+ *   - 不带 scheme = http/https 都放行；带 `https://` 则只放行 https
+ *   - 只影响 Microsoft Edge；本地 file:// 链接会被一并拦掉（Edge 策略的已知行为）
+ *
+ * 生命周期：**独立于 AI 教官运行状态**；Pic2Pet 退出时自动清除策略（恢复 Edge），
+ * 异常被杀死则下次启动按 enabled 重放（自愈）。
+ */
+struct WebFilterCfg {
+    bool enabled = false;
+    QStringList entries;      // 白名单条目（Edge 策略格式，见上面语义）
+};
+
+/**
  * AI 教官的全部配置。**默认配置 = 目标「学习」+ DeepSeek + 60~300s 自适应间隔 +
  * 课堂模式关**，右键「AI 教官」一键启动用的就是它；详细项在设置页第 7 页改。
  */
@@ -87,6 +107,7 @@ struct TeacherConfig {
     TeacherRuleCfg rules;
     TeacherJudgeCfg judge;
     TeacherPomodoroCfg pomodoro;
+    WebFilterCfg webFilter;
 
     /** 从 INI 的 [teacher] 组读（缺项用默认值） */
     void load(QSettings& s);

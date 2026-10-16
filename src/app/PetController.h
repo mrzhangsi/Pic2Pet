@@ -13,6 +13,7 @@
 #include "PetMotion.h"
 #include "Settings.h"
 #include "TeacherMonitor.h"
+#include "WebFilter.h"
 
 class QMenu;
 class QSystemTrayIcon;
@@ -69,6 +70,17 @@ public:
     void startTeacher();
     void stopTeacher();
     bool teacherRunning() const { return teacher_ != nullptr; }
+
+    /**
+     * Edge 网站白名单（学习监督的配套功能，**与 AI 教官相互独立**）：
+     * 开启后本机 Edge 只能访问白名单网站（路径按前缀匹配，语义见
+     * TeacherConfig.h 的 WebFilterCfg）。entries 为空 = 拒绝开启
+     * （否则 URLBlocklist 全拦会把 Edge 整个关死）。
+     * 实现 = 写 HKCU\SOFTWARE\Policies\Microsoft\Edge 策略，无需管理员；
+     * **Pic2Pet 退出时自动清除**（用户要求「关闭 Pic2Pet 时限制不保留」）。
+     */
+    void setWebFilter(bool on, const QStringList& entries);
+    bool webFilterEnabled() const { return settings_.data.teacher.webFilter.enabled; }
 
     /**
      * 开关"输入模式"：全局监听键盘，敲键时触发「输入」动作。
@@ -157,6 +169,10 @@ private:
     /** 缩放回到 100% 并移回主屏右下角默认位置 */
     void resetPlacement();
     void rebuildMenu(QMenu* menu);
+    /** 按 settings 里的白名单配置写 Edge 策略（用户开启 / 启动时自愈重放） */
+    void applyWebFilter();
+    /** 清除我们写的 Edge 策略（用户关闭 / 进程退出）。幂等 */
+    void clearWebFilter();
 
     PetWindow* window_ = nullptr;
     IClickThrough* clickThrough_ = nullptr;
@@ -190,6 +206,10 @@ private:
     // ---- AI 教官（不启用时完全不创建，无截屏 / 无摄像头 / 无网络）----
     TeacherMonitor* teacher_ = nullptr;
     TeacherStatus lastTeacherStatus_;   // 供设置页回灌的最近一次状态
+
+    // ---- Edge 网站白名单（独立小工具，值语义持有；退出时清除）----
+    WebFilter webFilter_;
+    QString webFilterError_;   // 最近一次开启失败的原因（喂给设置页与托盘）
 
     FrameSequence seq_;             // 当前正在播放的动作序列（= actions_ 里当前动作的 seq）
     ActionSet actions_;             // 待机 / 单击 / 双击 / 拖拽

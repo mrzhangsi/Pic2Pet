@@ -8,7 +8,6 @@
 #include "ClickThrough.h"
 #include "PetController.h"
 #include "Theme.h"
-#include "WebFilterElevated.h"
 
 namespace {
 
@@ -34,21 +33,6 @@ int main(int argc, char** argv) {
     QApplication::setWindowIcon(QIcon(QStringLiteral(":/app.ico")));   // 来自 app.qrc
     QApplication::setQuitOnLastWindowClosed(false);   // 托盘模式下关窗不退出
     pic2pet::theme::applyAppStyle(&app);              // 界面字体（样式表只挂在设置窗口上）
-
-    // ---- 提权子进程：写/清 Edge 策略后立刻退出，绝不进入桌宠流程 ----
-    // 必须放在 QCommandLineParser 之前：parser 遇到不认识的参数会直接 exit()，
-    // 而这两个参数是给"提权重启的自己"用的，不注册成 parser 选项。
-    for (int i = 1; i + 1 < argc; ++i) {
-        const QString arg = QString::fromLocal8Bit(argv[i]);
-        if (arg == QLatin1String(pic2pet::WebFilterElevated::kApplyArg)) {
-            pic2pet::WebFilterElevated::runChildJob(QString::fromLocal8Bit(argv[i + 1]), true);
-            return 0;
-        }
-        if (arg == QLatin1String(pic2pet::WebFilterElevated::kClearArg)) {
-            pic2pet::WebFilterElevated::runChildJob(QString::fromLocal8Bit(argv[i + 1]), false);
-            return 0;
-        }
-    }
 
     QCommandLineParser parser;
     parser.setApplicationDescription(QStringLiteral("Pic2Pet：透明桌宠，支持 GIF / APNG / 静态图"));
@@ -138,8 +122,28 @@ int main(int argc, char** argv) {
 
     if (parser.isSet(settingsOption)) {
         bool pageOk = false;
-        const int page = parser.value(settingsOption).toInt(&pageOk);
+        // 支持 `--settings=6` 或 `--settings=6=C:\out\page.png`。
+        // 带路径时开窗后离屏抓整页并退出 —— 用于自动化验证界面，
+        // 绕开「全屏截图会截到压在窗口上面的其它程序」这个问题。
+        const QString value = parser.value(settingsOption);
+        const int colon = value.indexOf(QLatin1Char('='));
+        const QString pagePart = colon >= 0 ? value.left(colon) : value;
+        const QString grabPath = colon >= 0 ? value.mid(colon + 1) : QString();
+        const int page = pagePart.toInt(&pageOk);
+
         controller.openSettings(pageOk ? page : 0);
+
+        if (!grabPath.isEmpty()) {
+            QTimer::singleShot(700, &app, [&controller, page, grabPath] {
+                // 关掉已开的那扇，再离屏抓当前页 —— 抓整页内容而不是视口
+                const bool ok = controller.grabSettingsPage(page, grabPath);
+                qInfo().noquote() << QStringLiteral("GRAB-SETTINGS %1 %2")
+                                         .arg(ok ? QStringLiteral("ok") : QStringLiteral("failed"))
+                                         .arg(grabPath);
+                QCoreApplication::quit();
+            });
+            return app.exec();
+        }
     }
 
     if (parser.isSet(teacherOption)) {

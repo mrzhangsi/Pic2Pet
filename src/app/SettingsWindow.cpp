@@ -868,18 +868,18 @@ QScrollArea* SettingsWindow::buildTeacherPage() {
     addRow(pom, QStringLiteral("休息时长"), QStringLiteral("休息期间不截图、不开摄像头"),
            breakRow, true);
 
-    // ---- 网站白名单（Edge）卡：独立开关，与 AI 教官运行状态无关 ----
+    // ---- 网站白名单检测（Edge）卡：独立开关，与 AI 教官运行状态无关 ----
     auto* web = card();
     webFilterToggle_ = new ToggleSwitch;
     connect(webFilterToggle_, &QAbstractButton::toggled, this, [this](bool on) {
         if (!suppressSignals_) emit teacherWebFilterToggled(on);
     });
-    addRow(web, QStringLiteral("网站白名单（Edge）"),
-           QStringLiteral("开启后 Edge 只能访问下面的网站。写入系统级策略，"
-                          "每次开关都会弹管理员授权；Pic2Pet 退出时自动解除"),
+    addRow(web, QStringLiteral("网站白名单提醒（Edge）"),
+           QStringLiteral("开启后每秒读一次 Edge 地址栏，访问白名单外的网站就弹窗提醒。"
+                          "只提醒不拦截，也不修改系统"),
            webFilterToggle_);
 
-    // 条目列表：行内删除。空名单时开关置灰（开启 = 把 Edge 整个关死）
+    // 条目列表：行内删除。空名单时开关置灰（没有判定基准，开着只会一直报警）
     webFilterListPage_ = new QWidget;
     webFilterListLayout_ = new QVBoxLayout(webFilterListPage_);
     webFilterListLayout_->setContentsMargins(16, 10, 16, 10);
@@ -905,7 +905,6 @@ QScrollArea* SettingsWindow::buildTeacherPage() {
     aeh->addWidget(webFilterEntryEdit_, 1);
     aeh->addWidget(addEntryBtn, 0, Qt::AlignVCenter);
     qobject_cast<QVBoxLayout*>(web->layout())->addWidget(addEntryRow);
-    qobject_cast<QVBoxLayout*>(web->layout())->addWidget(separator());
 
     // 状态行：占满整行（addRow 的右栏只有 0 拉伸，长文本会被挤扁）
     auto* webStatusRow = new QWidget;
@@ -915,17 +914,6 @@ QScrollArea* SettingsWindow::buildTeacherPage() {
     webFilterStatusLabel_ = label(QString(), QStringLiteral("rowSub"));
     webFilterStatusLabel_->setWordWrap(true);
     wsh->addWidget(webFilterStatusLabel_, 1);
-
-    // 快捷入口：策略不是实时生效的，用户需要一个地方去看"到底生效没有"，
-    // 并且能在那里点「重新加载」强制 Edge 立刻重读策略
-    auto* policyBtn = ghostButton(QStringLiteral("打开 edge://policy"));
-    policyBtn->setToolTip(
-        QStringLiteral("查看 Edge 实际读到的策略；策略没实时生效时，"
-                       "在那个页面点「重新加载」可以立刻重读"));
-    connect(policyBtn, &QPushButton::clicked, this, [] {
-        QDesktopServices::openUrl(QUrl(QStringLiteral("edge://policy")));
-    });
-    wsh->addWidget(policyBtn, 0, Qt::AlignVCenter);
     qobject_cast<QVBoxLayout*>(web->layout())->addWidget(webStatusRow);
 
     auto* lay = pageLayout(page);
@@ -940,18 +928,15 @@ QScrollArea* SettingsWindow::buildTeacherPage() {
     lay->addWidget(web);
     lay->addSpacing(12);
     lay->addWidget(noteBox(QStringLiteral(
-        "白名单语义直通 Edge 官方策略：路径按前缀匹配（example.com/math 匹配所有 "
-        "/math… 开头的路径）；主机名不带点 = 含全部子域（bilibili.com 含 "
-        "www.bilibili.com），带点前缀 = 只匹配这一个主机名；不带 https:// 时 "
-        "http/https 都放行。\n"
-        "只影响 Microsoft Edge，其他浏览器不受限制；Edge 里显示 "
-        "「Managed by your organization」是预期行为。本地 file:// 链接会被一并拦掉"
-        "（Edge 策略的已知行为）。\n"
-        "⚠ 机器级限制：本机所有 Windows 账户的 Edge 都会被一起限。"
-        "策略不是实时生效的——Edge 启动时读，之后约每 15 分钟重读，"
-        "或到 edge://policy 点「重新加载」。\n"
-        "退出 Pic2Pet 会自动解除限制（会再弹一次管理员授权）；"
-        "若被强行杀死，策略会留着继续生效，下次启动时本卡片会提示实际状态。")));
+        "匹配语义：路径按前缀匹配（example.com/math 匹配所有 /math… 开头的路径，"
+        "但不含 /mathx）；主机名不带点 = 含全部子域（bilibili.com 含 "
+        "www.bilibili.com），前缀带点 = 只匹配这一个主机名；条目里的 "
+        "https:// 与端口会被忽略，http/https 都放行。\n"
+        "⚠ 这只是**提醒**，不是拦截：关掉警告窗就能继续访问，"
+        "它的定位是专注时的自我提醒，不是家长控制。\n"
+        "只读取 Microsoft Edge 的地址栏，其他浏览器不管；Edge 内部页"
+        "（edge://、about:、本地文件等）永远不报警。关闭 Pic2Pet 检测即失效，"
+        "不写注册表、不需要管理员权限、不改动系统任何设置。")));
     lay->addSpacing(12);
     lay->addWidget(noteBox(QStringLiteral(
         "隐私：只在启动后定时截屏 / 拍照，图片不落盘、不上传除模型外的任何地方，"
@@ -988,10 +973,8 @@ void SettingsWindow::refreshTeacher() {
     teacherBreakSpin_->setValue(int(t.pomodoro.breakMinutes));
 
     webFilterToggle_->setChecked(t.webFilter.enabled);
-    // 空名单禁止开启（否则等于把 Edge 整个关死）；开着的时候条目不可能为空。
-    // 提权等待中一律禁用——否则这里会把 busy 态覆盖掉，用户能连点开一堆 UAC
-    webFilterToggle_->setEnabled(!webFilterBusy_
-                                  && (!t.webFilter.entries.isEmpty() || t.webFilter.enabled));
+    // 空名单禁止开启（没有判定基准，开着只会所有站点都报警）
+    webFilterToggle_->setEnabled(!t.webFilter.entries.isEmpty() || t.webFilter.enabled);
     rebuildWebFilterList();
     updateWebFilterStatus();
 
@@ -1009,25 +992,8 @@ void SettingsWindow::setTeacherRunning(bool running) {
     updateTeacherStatusUi();
 }
 
-void SettingsWindow::setWebFilterError(const QString& error) {
-    webFilterErrorText_ = error;
-    updateWebFilterStatus();
-}
-
-void SettingsWindow::setWebFilterPolicyActive(bool active) {
-    policyStillActive_ = active;
-    updateWebFilterStatus();
-}
-
-void SettingsWindow::setWebFilterBusy(bool busy) {
-    webFilterBusy_ = busy;
-    if (webFilterToggle_) {
-        webFilterToggle_->setEnabled(!busy);
-        // 提权等待时给出可解释的等待态，而不是让用户盯着一个没反应的开关
-        webFilterToggle_->setToolTip(
-            busy ? QStringLiteral("正在等待管理员授权…")
-                 : QStringLiteral("开启或关闭都需要管理员授权（写入系统级 Edge 策略）"));
-    }
+void SettingsWindow::setWebFilterRunning(bool running) {
+    webFilterRunning_ = running;
     updateWebFilterStatus();
 }
 
@@ -1044,7 +1010,7 @@ void SettingsWindow::rebuildWebFilterList() {
     const QStringList& entries = settings_->data.teacher.webFilter.entries;
     if (entries.isEmpty()) {
         auto* hint = label(QStringLiteral("还没有条目。至少添加一个网站才能开启——"
-                                          "空名单会把 Edge 整个关死。"),
+                                          "空名单会让所有网站都报警。"),
                            QStringLiteral("rowSub"));
         hint->setWordWrap(true);
         webFilterListLayout_->addWidget(hint);
@@ -1071,36 +1037,22 @@ void SettingsWindow::rebuildWebFilterList() {
 
 void SettingsWindow::updateWebFilterStatus() {
     if (!webFilterStatusLabel_) return;
-
-    if (webFilterBusy_) {
-        webFilterStatusLabel_->setText(QStringLiteral("正在等待管理员授权…请在弹出的窗口点「是」。"));
-        webFilterStatusLabel_->setStyleSheet(QStringLiteral("color:#8E8E93;"));
-        return;
-    }
-    if (!webFilterErrorText_.isEmpty()) {
-        webFilterStatusLabel_->setText(webFilterErrorText_);
-        webFilterStatusLabel_->setStyleSheet(QStringLiteral("color:#FF3B30;"));
-        return;
-    }
     webFilterStatusLabel_->setStyleSheet(QString());
 
     const TeacherConfig& t = settings_->data.teacher;
-    if (t.webFilter.enabled) {
-        // enabled=true 只代表"用户想要这个限制"。上一条消息（controller 查过注册表）
-        // 告诉我们策略是否真的还挂着 —— 进程被强杀时限制仍在，正常退出则已被清除。
-        webFilterStatusLabel_->setText(
-            policyStillActive_
-                ? QStringLiteral("生效中：Edge 只能访问上面 %1 个网站。"
-                                 "策略不是实时生效的——重启 Edge、或等约 15 分钟，"
-                                 "或到 edge://policy 点「重新加载」才会拦上。")
-                      .arg(t.webFilter.entries.size())
-                : QStringLiteral("限制当前未生效：上次开启的策略已不在注册表里"
-                                 "（正常退出 Pic2Pet 会自动解除）。"
-                                 "把上面的开关关掉再打开即可重新写入。"));
+    if (t.webFilter.enabled && webFilterRunning_) {
+        webFilterStatusLabel_->setText(QStringLiteral(
+            "检测中：每秒读一次 Edge 地址栏，访问上面 %1 个网站以外的站点就会弹窗提醒。"
+            "提醒可以关掉，不会拦住你。").arg(t.webFilter.entries.size()));
+    } else if (t.webFilter.enabled) {
+        // enabled=true 但监视线程没起来：非 Windows 就是这种情况（没有 Edge 可读）
+        webFilterStatusLabel_->setText(QStringLiteral(
+            "已开启，但当前平台没有可监视的 Edge（仅 Windows 生效）。"));
+        webFilterStatusLabel_->setStyleSheet(QStringLiteral("color:#8E8E93;"));
     } else if (t.webFilter.entries.isEmpty()) {
         webFilterStatusLabel_->setText(QStringLiteral("未开启。先添加至少一个网站才能开启。"));
     } else {
-        webFilterStatusLabel_->setText(QStringLiteral("未开启。"));
+        webFilterStatusLabel_->setText(QStringLiteral("未开启检测。"));
     }
 }
 
@@ -1119,7 +1071,6 @@ void SettingsWindow::addWebFilterEntry() {
     }
     entries.append(text);
     webFilterEntryEdit_->clear();
-    webFilterErrorText_.clear();
     emit teacherWebFilterEntriesChanged(entries);
 }
 
@@ -1127,7 +1078,6 @@ void SettingsWindow::removeWebFilterEntry(int index) {
     QStringList entries = settings_->data.teacher.webFilter.entries;
     if (index < 0 || index >= entries.size()) return;
     entries.removeAt(index);
-    webFilterErrorText_.clear();
     emit teacherWebFilterEntriesChanged(entries);
 }
 
@@ -1221,6 +1171,25 @@ void SettingsWindow::showPage(int index) {
     // 侧栏选中态跟着走
     const auto items = findChildren<SidebarItem*>();
     for (int i = 0; i < items.size(); ++i) items.at(i)->setChecked(i == index);
+}
+
+bool SettingsWindow::grabPage(const QString& path) {
+    if (!stack_ || stack_->count() == 0) return false;
+    QWidget* page = stack_->currentWidget();
+    if (!page) return false;
+
+    // 当前页若是 QScrollArea（AI 教官页就是），抓它内部的 page 而不是视口 ——
+    // 视口只有窗口那么高，白名单那张卡在下面根本抓不到。
+    QWidget* target = page;
+    if (auto* scroll = qobject_cast<QScrollArea*>(page)) {
+        if (QWidget* inner = scroll->widget()) target = inner;
+    }
+
+    // 让控件把布局算完再抓，否则 grab 拿到的是未布局的尺寸
+    target->ensurePolished();
+    const QPixmap pm = target->grab();
+    if (pm.isNull()) return false;
+    return pm.save(path);
 }
 void SettingsWindow::scheduleAppearanceEmit() {
     if (suppressSignals_) return;

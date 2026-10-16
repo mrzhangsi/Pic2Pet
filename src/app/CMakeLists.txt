@@ -17,6 +17,8 @@ add_executable(Pic2Pet
     PetMotion.cpp
     KeyBubble.h
     KeyBubble.cpp
+    EdgeAlert.h
+    EdgeAlert.cpp
     SettingsWindow.h
     SettingsWindow.cpp
     AutoStart.h
@@ -33,6 +35,7 @@ target_link_libraries(Pic2Pet
         Pic2Pet::input
         Pic2Pet::ui
         Pic2Pet::teacher
+        Pic2Pet::monitor
         Qt6::Core
         Qt6::Gui
         Qt6::Widgets

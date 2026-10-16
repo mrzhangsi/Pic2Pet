@@ -15,6 +15,9 @@ add_subdirectory(ui)
 # AI 教官：学习状态监控（L0 本地规则 + L1 视觉模型 + L2 状态机）。见 teacher/README.md
 add_subdirectory(teacher)
 
+# 本机行为监视：Edge 地址栏白名单检测（只读 + 弹窗，不改系统）。见 monitor/README.md
+add_subdirectory(monitor)
+
 # 后续里程碑接入，目录已建好（见各目录 README.md）
 # add_subdirectory(psd)        # M2  PSD 只读解析 + rigger 装配 + .petbin
 # add_subdirectory(rig)        # M2  RigParams / deform / 弹簧物理 / 表情 / 动作

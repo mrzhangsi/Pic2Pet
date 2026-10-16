@@ -75,26 +75,31 @@ struct TeacherPomodoroCfg {
 };
 
 /**
- * 网站白名单（Edge 上网限制）：开启后 Edge 只能访问 entries 里的网站。
+ * 网站白名单提醒（Edge 上网检测）：开启后每秒读一次 Edge 地址栏，
+ * 访问到 entries 外的网站就弹窗提醒。
  *
- * 语义**直通 Edge 原生策略**（URLBlocklist 写 `*` 全拦 + URLAllowlist 写例外）：
+ * ⚠ **只提醒，不拦截。** 关掉警告窗就能继续访问。它的定位是"专注时的自我提醒"，
+ * 不是家长控制。第一版是写 Edge 原生策略真拦截，实测走不通（Windows 策略只能写
+ * HKLM，每次开关都要弹 UAC、是机器级、还会让 Edge 挂上 "Managed by your
+ * organization"），已整体改为只检测，见 src/monitor/README.md。
+ *
+ * 匹配语义沿用 Edge 官方 URL 过滤器的直觉（用户配条目的心智不变）：
  *   - 条目格式 `[scheme://][.]host[:port][/path]`，路径为**前缀匹配**
- *     （`hosting.com/good_path` 匹配所有 `/good_path…` 开头的路径）
+ *     （`example.com/math` 匹配 `/math`、`/math/x`，但不含 `/mathx`）
  *   - 主机名不带点前缀 = 含全部子域（`bilibili.com` 匹配 `www.bilibili.com`）；
  *     带点前缀（`.www.bilibili.com`）= 只匹配这一个精确主机名
- *   - 不带 scheme = http/https 都放行；带 `https://` 则只放行 https
- *   - 只影响 Microsoft Edge；本地 file:// 链接会被一并拦掉（Edge 策略的已知行为）
+ *   - scheme 与端口会被忽略（http/https 都放行）—— 因为只做判定，不需要真的按协议拦
+ *   - 只读 Microsoft Edge 的地址栏；其他浏览器不管
+ *   - Edge 内部页（edge://、about:、file:// 等）永远不报警
  *
  * 生命周期：**独立于 AI 教官运行状态**。
- *   - enabled = "用户想要这个限制"，**不等于**策略此刻真的挂着
- *     （策略在 HKLM，见 WebFilter.h；正常退出会清掉、强杀会留着）
- *   - Pic2Pet 退出时自动清除（恢复 Edge），会弹一次 UAC
- *   - 异常被杀死：策略留着继续生效，下次启动 UI 会如实显示实际状态；
- *     **不做自动重放** —— 开机就弹管理员授权没人受得了
+ *   - enabled = 是否开启检测；entries 为空时不允许开启（没有判定基准）
+ *   - Pic2Pet 退出即失效（本来就是纯只读，没有任何需要清理的东西）
+ *   - 不写注册表、不需要管理员权限、不改动系统任何设置
  */
 struct WebFilterCfg {
     bool enabled = false;
-    QStringList entries;      // 白名单条目（Edge 策略格式，见上面语义）
+    QStringList entries;      // 白名单条目（匹配语义见上面）
 };
 
 /**

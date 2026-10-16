@@ -48,22 +48,24 @@ public:
     void setTeacherRunning(bool running);
     void setTeacherStatus(const TeacherStatus& status);
 
-    /** 网站白名单：控制器喂进来的最近一次错误（空 = 正常）。refresh 后会再调一次 */
-    void setWebFilterError(const QString& error);
-
-    /** 网站白名单：提权等待中。期间禁用开关并在状态行说明，避免连点开一堆 UAC */
-    void setWebFilterBusy(bool busy);
-
     /**
-     * 网站白名单：注册表里策略是否真的挂着。
-     * 与 settings 里的 enabled 是**两回事** —— enabled 是"用户想要什么"，
-     * 这个是"现在实际是什么"。进程被强杀时两者会不一致（策略还在但软件没了），
-     * 正常退出则相反（enabled 记着 true、策略已被清除）。UI 要如实区分。
+     * 网站白名单检测：监视线程是否真的在跑。
+     * 与 settings 里的 enabled 分开报 —— 非 Windows 上 enabled 会记着 true 但没有
+     * 可监视的 Edge，状态行得如实说"当前平台不生效"，不能让人以为在拦。
      */
-    void setWebFilterPolicyActive(bool active);
+    void setWebFilterRunning(bool running);
 
     /** 切到某一页（0 素材 / 1 动作 / 2 输入 / 3 动态效果 / 4 外观 / 5 通用 / 6 AI 教官） */
     void showPage(int index);
+
+    /**
+     * 离屏抓取当前页的完整内容（含滚动区里看不到的下半部分）到 PNG。
+     *
+     * 用途：界面自动化验证。窗口再大也装不下 AI 教官页（那张卡在很下面），
+     * 而**全屏截图会截到压在窗口上面的其它程序**（本机前台常年是终端）。
+     * 内部把滚动区的内容整块 render 出来，不受遮挡与窗口大小影响。
+     */
+    bool grabPage(const QString& path);
 
 signals:
     void inputModeChanged(bool on);
@@ -180,15 +182,13 @@ private:
     bool teacherRunning_ = false;
     bool teacherHasReport_ = false;   // 是否收到过结束报告（决定状态卡显示什么）
 
-    // ---- AI 教官页 · 网站白名单（Edge）卡 ----
+    // ---- AI 教官页 · 网站白名单检测（Edge）卡 ----
     ToggleSwitch* webFilterToggle_ = nullptr;
     QWidget* webFilterListPage_ = nullptr;      // 条目列表容器（随条目数重建）
     QVBoxLayout* webFilterListLayout_ = nullptr;
     QLineEdit* webFilterEntryEdit_ = nullptr;   // 新条目输入框
-    QLabel* webFilterStatusLabel_ = nullptr;    // 状态行（生效中 / 未开启 / 失败原因）
-    QString webFilterErrorText_;                // 控制器喂进来的错误（空 = 正常）
-    bool webFilterBusy_ = false;                // 提权等待中：禁用开关
-    bool policyStillActive_ = false;            // 控制器查过注册表：策略实际是否挂着
+    QLabel* webFilterStatusLabel_ = nullptr;    // 状态行（检测中 / 未开启 / 平台不支持）
+    bool webFilterRunning_ = false;             // 控制器喂进来：监视线程是否真的在跑
 
     QHash<int, ActionRow> actionRows_;   // key = int(PetAction)
 

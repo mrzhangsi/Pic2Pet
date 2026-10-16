@@ -23,10 +23,6 @@ add_library(Pic2Pet_teacher STATIC
     TeacherStats.cpp
     TeacherMonitor.h
     TeacherMonitor.cpp
-    WebFilter.h
-    WebFilter.cpp
-    WebFilterElevated.h
-    WebFilterElevated.cpp
 )
 
 add_library(Pic2Pet::teacher ALIAS Pic2Pet_teacher)
@@ -39,7 +35,7 @@ target_link_libraries(Pic2Pet_teacher
         Qt6::Gui          # QImage
         Qt6::Network      # QNetworkAccessManager（HTTPS 走系统 Schannel，零额外 DLL）
     PRIVATE
-        $<$<PLATFORM_ID:Windows>:mf mfplat mfreadwrite mfuuid ole32 advapi32 shell32>
+        $<$<PLATFORM_ID:Windows>:mf mfplat mfreadwrite mfuuid ole32 advapi32>
 )
 
 # 本模块只用 QtCore/Gui/Network，**不依赖 Widgets**——设置页在 app/SettingsWindow。

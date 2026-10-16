@@ -13,7 +13,8 @@
 #include "PetMotion.h"
 #include "Settings.h"
 #include "TeacherMonitor.h"
-#include "WebFilterElevated.h"
+
+#include <memory>
 
 class QMenu;
 class QSystemTrayIcon;
@@ -26,6 +27,8 @@ class KeyboardMonitor;
 class PetWindow;
 class SettingsWindow;
 class TeacherReport;
+class EdgeWatch;
+class EdgeAlert;
 
 /**
  * 装配中心：把窗口、渲染、素材播放、穿透调度、配置与性能采样串起来。
@@ -56,6 +59,12 @@ public:
     /** 抓取当前渲染结果（离屏，不依赖窗口是否可见），用于自动化验证渲染路径 */
     bool grabFramebuffer(const QString& path);
 
+    /**
+     * 离屏抓取设置窗口某一页的**完整内容**（含滚动区下半部分）到 PNG。
+     * 与 grabFramebuffer 同思路：绕开「全屏截图会截到压在窗口上面的其它程序」。
+     */
+    bool grabSettingsPage(int page, const QString& path);
+
     /** 打开新版「设置」窗口（左侧边栏 + 分页）；page 用来直接跳到某一页（开发/截图用） */
     void openSettings(int page = 0);
 
@@ -72,26 +81,25 @@ public:
     bool teacherRunning() const { return teacher_ != nullptr; }
 
     /**
-     * Edge 网站白名单（学习监督的配套功能，**与 AI 教官相互独立**）：
-     * 开启后本机 Edge 只能访问白名单网站（路径按前缀匹配，语义见
-     * TeacherConfig.h 的 WebFilterCfg）。entries 为空 = 拒绝开启
-     * （否则 URLBlocklist 全拦会把 Edge 整个关死）。
+     * Edge 网站白名单**检测**（学习监督的配套功能，与 AI 教官相互独立）：
+     * 开启后每秒读一次 Edge 地址栏，访问到白名单外的网站就弹个警告窗。
      *
-     * 实现 = 写 **HKLM**\SOFTWARE\Policies\Microsoft\Edge 策略，**每次开关都要弹 UAC**
-     * （HKCU\Software\Policies 出厂默认只读，写不了；原因见 WebFilter.h）。
-     * 因此这是**机器级**限制：本机所有账户的 Edge 都会被一起限。
+     * ## 它不做拦截，也不改系统
      *
-     * **Pic2Pet 退出时自动清除**（用户要求「关闭 Pic2Pet 时限制不保留」），
-     * 代价是退出时会再弹一次 UAC。
+     * 第一版是写 Edge 官方 URL 策略真拦截，实测走不通：
+     * 策略在 Windows 只能写 HKLM（`HKCU\Software\Policies` 出厂默认只读），
+     * 于是每次开关都要弹 UAC、是机器级限制、还会让 Edge 挂上
+     * "Managed by your organization"。用户决定改为**只检测 + 弹窗**：
+     * 无需 UAC、零残留、不影响别的浏览器。
      *
-     * 这里是异步的（提权要十几秒，不能卡住 GUI）；结果通过
-     * setWebFilterError 回报，设置窗口自己拉取状态。
+     * 代价要说清：**这是提醒不是防护**，关掉警告就能继续访问。
+     * 定位是"专注时的自我提醒"，不是家长控制。
+     *
+     * entries 为空 = 拒绝开启（没有判定基准，会让所有站点都报警）。
+     * 白名单改动需要 stop + start 才生效（监视器持有的是启动时的快照）。
      */
     void setWebFilter(bool on, const QStringList& entries);
     bool webFilterEnabled() const { return settings_.data.teacher.webFilter.enabled; }
-
-    /** 白名单操作是否正在进行（提权等待中）——UI 据此禁用开关 */
-    bool webFilterBusy() const { return webFilterBusy_; }
 
     /**
      * 开关"输入模式"：全局监听键盘，敲键时触发「输入」动作。
@@ -180,10 +188,10 @@ private:
     /** 缩放回到 100% 并移回主屏右下角默认位置 */
     void resetPlacement();
     void rebuildMenu(QMenu* menu);
-    /** 按 settings 里的白名单配置写 Edge 策略（用户开启 / 启动时自愈重放） */
-    void applyWebFilter();
-    /** 清除我们写的 Edge 策略（用户关闭 / 进程退出）。幂等 */
-    void clearWebFilter();
+    /** 按 settings 里的白名单启停 Edge 监视器（用户开关 / 启动时恢复 / 白名单改动后重启） */
+    void restartEdgeWatch();
+    /** 监视器报来越界站点：弹警告窗 */
+    void onEdgeViolation(const QString& site, const QStringList& entries);
 
     PetWindow* window_ = nullptr;
     IClickThrough* clickThrough_ = nullptr;
@@ -218,9 +226,9 @@ private:
     TeacherMonitor* teacher_ = nullptr;
     TeacherStatus lastTeacherStatus_;   // 供设置页回灌的最近一次状态
 
-    // ---- Edge 网站白名单（独立小工具，值语义持有；退出时清除）----
-    QString webFilterError_;   // 最近一次开启失败的原因（喂给设置页与托盘）
-    bool webFilterBusy_ = false;   // 提权等待中：UI 要禁用开关，避免连点开一堆 UAC
+    // ---- Edge 网站白名单检测（独立小工具；不改系统，退出即消失）----
+    std::unique_ptr<EdgeWatch> edgeWatch_;   // 按需创建；不开启时连线程都没有
+    EdgeAlert* edgeAlert_ = nullptr;         // 警告窗；只在第一次越界时创建，之后复用
 
     FrameSequence seq_;             // 当前正在播放的动作序列（= actions_ 里当前动作的 seq）
     ActionSet actions_;             // 待机 / 单击 / 双击 / 拖拽

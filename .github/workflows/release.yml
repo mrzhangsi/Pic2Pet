@@ -68,16 +68,25 @@ jobs:
           windeployqt --release --no-translations --no-system-d3d-compiler `
             --no-opengl-sw --no-compiler-runtime "$dist/Pic2Pet.exe"
 
-          # 精简：只保留 desktop OpenGL 需要的运行库
-          $prune = @('dxcompiler.dll','dxil.dll','Qt6Network.dll','Qt6Svg.dll','imageformats\qsvg.dll')
+          # 精简：只保留 desktop OpenGL 需要的运行库。
+          #
+          # ⚠️ Qt6Network.dll 与 tls\ 必须保留：AI 教官用 QNetworkAccessManager 走
+          # HTTPS 调视觉模型，Qt 在没有 OpenSSL DLL 时回退到系统 Schannel 后端
+          # （已实测 2026-10-12）。这两个约 1.6MB，不引入任何第三方依赖。
+          # 早前的版本把 networkinformation 与整个 tls 目录一起删了，那会静默
+          # 打断 AI 教官的 HTTPS —— 本地 deploy.bat 早已修正，这里同步。
+          $prune = @('dxcompiler.dll','dxil.dll','Qt6Svg.dll','imageformats\qsvg.dll')
           foreach ($f in $prune) {
             $p = Join-Path $dist $f
             if (Test-Path $p) { Remove-Item $p -Force }
           }
-          foreach ($d in @('generic','iconengines','networkinformation','tls')) {
+          foreach ($d in @('generic','iconengines','networkinformation')) {
             $p = Join-Path $dist $d
             if (Test-Path $p) { Remove-Item $p -Recurse -Force }
           }
+          # tls\ 只删证书专用的那个后端，保留 qschannelbackend.dll
+          $certOnly = Join-Path $dist 'tls\qcertonlybackend.dll'
+          if (Test-Path $certOnly) { Remove-Item $certOnly -Force }
 
           # 应用清单（asInvoker / DPI / Win10-11 supportedOS）已在链接期由 app.rc 焊死进 exe，
           # 不再依赖 mt.exe 后处理（CI runner 上 mt.exe 常不在 PATH，会导致发布版缺清单、

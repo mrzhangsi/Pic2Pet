@@ -85,8 +85,12 @@ struct TeacherPomodoroCfg {
  *   - 不带 scheme = http/https 都放行；带 `https://` 则只放行 https
  *   - 只影响 Microsoft Edge；本地 file:// 链接会被一并拦掉（Edge 策略的已知行为）
  *
- * 生命周期：**独立于 AI 教官运行状态**；Pic2Pet 退出时自动清除策略（恢复 Edge），
- * 异常被杀死则下次启动按 enabled 重放（自愈）。
+ * 生命周期：**独立于 AI 教官运行状态**。
+ *   - enabled = "用户想要这个限制"，**不等于**策略此刻真的挂着
+ *     （策略在 HKLM，见 WebFilter.h；正常退出会清掉、强杀会留着）
+ *   - Pic2Pet 退出时自动清除（恢复 Edge），会弹一次 UAC
+ *   - 异常被杀死：策略留着继续生效，下次启动 UI 会如实显示实际状态；
+ *     **不做自动重放** —— 开机就弹管理员授权没人受得了
  */
 struct WebFilterCfg {
     bool enabled = false;

@@ -947,8 +947,11 @@ QScrollArea* SettingsWindow::buildTeacherPage() {
         "只影响 Microsoft Edge，其他浏览器不受限制；Edge 里显示 "
         "「Managed by your organization」是预期行为。本地 file:// 链接会被一并拦掉"
         "（Edge 策略的已知行为）。\n"
-        "退出 Pic2Pet 会自动解除限制；若被强行杀死，下次启动按当前开关重放。"
-        "检测到组织 / 学校下发的策略时会拒绝开启（避免互相覆盖）。")));
+        "⚠ 机器级限制：本机所有 Windows 账户的 Edge 都会被一起限。"
+        "策略不是实时生效的——Edge 启动时读，之后约每 15 分钟重读，"
+        "或到 edge://policy 点「重新加载」。\n"
+        "退出 Pic2Pet 会自动解除限制（会再弹一次管理员授权）；"
+        "若被强行杀死，策略会留着继续生效，下次启动时本卡片会提示实际状态。")));
     lay->addSpacing(12);
     lay->addWidget(noteBox(QStringLiteral(
         "隐私：只在启动后定时截屏 / 拍照，图片不落盘、不上传除模型外的任何地方，"
